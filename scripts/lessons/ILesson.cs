@@ -21,6 +21,7 @@ public static class LessonCatalog
     private static readonly List<ILesson> All = new()
     {
         new DavidAndGoliath(),
+        new CreationGarden(),
     };
 
     public static IReadOnlyList<ILesson> List => All;

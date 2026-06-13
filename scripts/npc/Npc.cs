@@ -17,6 +17,7 @@ public partial class Npc : CharacterBody3D
     public Color Robe = new(0.55f, 0.5f, 0.7f);
     public Color Accent = new(0.7f, 0.6f, 0.4f);
     public float FaceRange = 7f;
+    public bool Beast = false; // use the animal model instead of a humanoid
 
     private Node3D _model;
     private Node3D _player;
@@ -25,20 +26,22 @@ public partial class Npc : CharacterBody3D
     public override void _Ready()
     {
         AddToGroup("npc");
-        _model = MobModel.BuildHumanoid(Skin, Robe, Accent);
+        _model = Beast ? MobModel.BuildBeast(Skin, Robe) : MobModel.BuildHumanoid(Skin, Robe, Accent);
         AddChild(_model);
 
         var col = new CollisionShape3D
         {
-            Shape = new CapsuleShape3D { Radius = 0.35f, Height = 1.7f },
-            Position = new Vector3(0, 0.85f, 0),
+            Shape = Beast
+                ? new CapsuleShape3D { Radius = 0.5f, Height = 1.0f }
+                : new CapsuleShape3D { Radius = 0.35f, Height = 1.7f },
+            Position = new Vector3(0, Beast ? 0.5f : 0.85f, 0),
         };
         AddChild(col);
 
         var label = new Label3D
         {
             Text = NpcName,
-            Position = new Vector3(0, 2.15f, 0),
+            Position = new Vector3(0, Beast ? 1.4f : 2.15f, 0),
             Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
             FontSize = 48,
             OutlineSize = 12,

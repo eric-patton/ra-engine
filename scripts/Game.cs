@@ -60,6 +60,12 @@ public partial class Game : Node3D
             case "--lesson-david":
                 StartLesson(Lessons.LessonCatalog.Get("david"));
                 break;
+            case "--lesson-creation":
+                StartLesson(Lessons.LessonCatalog.Get("creation"));
+                break;
+            case "--test-creation":
+                RunCreationTest();
+                break;
             case "--test-lesson":
                 RunLessonTest();
                 break;
@@ -160,6 +166,43 @@ public partial class Game : Node3D
 
         GD.Print($"[RA] lesson-test: jesseTalked={talked} goliathWoke={woke} goliathDefeated={defeated}");
         await Capture("res://_lesson_victory.png", 0.3);
+        GetTree().Quit(0);
+    }
+
+    private async void RunCreationTest()
+    {
+        var lesson = Lessons.LessonCatalog.Get("creation");
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(lesson.Spawn, creative: false, captureMouse: false);
+        lesson.Build(session);
+        session.Player.InputEnabled = false;
+
+        await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_creation.png", 0.3);
+
+        var animals = new System.Collections.Generic.List<NpcSys.Npc>();
+        foreach (Node n in GetTree().GetNodesInGroup("npc"))
+            if (n is NpcSys.Npc a) animals.Add(a);
+        int talked = 0;
+        foreach (var a in animals) a.Talked += () => talked++;
+
+        foreach (var a in animals)
+        {
+            session.StartDialogueWith(a);
+            int g = 0;
+            while (session.InDialogue && g++ < 12)
+            {
+                if (session.Dialogue.HasChoices) session.Dialogue.Choose(0);
+                else session.Dialogue.Advance();
+                await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
+            }
+        }
+
+        session.Player.GlobalPosition = new Vector3(32, 2, 12); // the Tree of Life
+        await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
+        GD.Print($"[RA] creation-test: animals={animals.Count} named={talked}");
+        await Capture("res://_creation2.png", 0.3);
         GetTree().Quit(0);
     }
 

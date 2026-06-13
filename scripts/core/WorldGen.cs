@@ -103,6 +103,26 @@ public static class WorldGen
         BuildHut(w, new Vector3I(16, 1, 12), 6, 5, 4);
     }
 
+    /// <summary>A simple tree: a log trunk with a blobby leaf canopy.</summary>
+    public static void Tree(VoxelWorld w, Vector3I basePos, int trunkHeight = 4,
+        string trunk = "oak_log", string leaf = "leaves")
+    {
+        ushort log = BlockRegistry.IdOf(trunk);
+        ushort leaves = BlockRegistry.IdOf(leaf);
+        for (int y = 0; y < trunkHeight; y++)
+            w.SetBlock(basePos + new Vector3I(0, y, 0), log, false);
+
+        Vector3I top = basePos + new Vector3I(0, trunkHeight, 0);
+        for (int x = -2; x <= 2; x++)
+        for (int z = -2; z <= 2; z++)
+        for (int y = -2; y <= 1; y++)
+        {
+            float d = Mathf.Sqrt(x * x + z * z + y * y * 1.3f);
+            if (d <= 2.4f)
+                w.SetBlock(top + new Vector3I(x, y, z), leaves, false);
+        }
+    }
+
     /// <summary>Hollow rectangular building with a doorway and a flat roof.</summary>
     public static void BuildHut(VoxelWorld w, Vector3I origin, int wx, int wz, int h,
         string wall = "mud_brick", string roof = "thatch")

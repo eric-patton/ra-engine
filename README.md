@@ -5,7 +5,9 @@ Build and explore voxel worlds, talk to characters, follow narrated story beats,
 and play through scripted lessons — designed for retelling **historical and
 Biblical scenes** in a way that captures a class's interest.
 
-The first lesson included is **David and Goliath** (the Valley of Elah).
+Two lessons are included: **David and Goliath** (the Valley of Elah — an action
+lesson with the sling) and **The Garden of Eden** (Creation — a peaceful
+exploration lesson, naming the animals). Both are picked from the main menu.
 
 ---
 
@@ -30,8 +32,9 @@ dotnet build "RA Engine.sln" -c Debug
 "C:\Godot\Godot_v4.6.2-stable_mono_win64.exe" --path .
 
 # jump straight into things
-"...Godot...exe" --path . -- --lesson-david   # play the lesson
-"...Godot...exe" --path . -- --menu           # main menu (default)
+"...Godot...exe" --path . -- --lesson-david      # play David & Goliath
+"...Godot...exe" --path . -- --lesson-creation   # play the Garden of Eden
+"...Godot...exe" --path . -- --menu              # main menu (default)
 
 # regenerate the texture library as fresh PNGs
 "...Godot...exe" --headless --path . -- --gen-textures
