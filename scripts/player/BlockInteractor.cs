@@ -20,6 +20,9 @@ public partial class BlockInteractor : Node3D
     private float _repeatTimer;
     private const float RepeatDelay = 0.18f;
 
+    /// <summary>The block currently under the crosshair (for the level editor).</summary>
+    public VoxelRay.Hit CurrentTarget => _target;
+
     public override void _Ready()
     {
         _highlight = new MeshInstance3D { Name = "Highlight", Mesh = BuildWireCube() };

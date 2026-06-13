@@ -32,6 +32,17 @@ public static class GameInput
 
         for (int i = 0; i < 9; i++)
             Key($"hotbar_{i + 1}", (Key)((int)Godot.Key.Key1 + i));
+
+        // level editor
+        Key(Actions.EditorSave, Godot.Key.F5);
+        Key(Actions.EditorLoad, Godot.Key.F9);
+        Key(Actions.MarkA, Godot.Key.Z);
+        Key(Actions.MarkB, Godot.Key.X);
+        Key(Actions.FillRegion, Godot.Key.F);
+        Key(Actions.ClearRegion, Godot.Key.R);
+        Key(Actions.Capture, Godot.Key.C);
+        Key(Actions.Stamp, Godot.Key.V);
+        Key(Actions.ToggleBuild, Godot.Key.B);
     }
 
     private static void Ensure(string action)
@@ -74,5 +85,14 @@ public static class GameInput
         public const string Inventory = "inventory";
         public const string HotbarNext = "hotbar_next";
         public const string HotbarPrev = "hotbar_prev";
+        public const string EditorSave = "editor_save";
+        public const string EditorLoad = "editor_load";
+        public const string MarkA = "editor_mark_a";
+        public const string MarkB = "editor_mark_b";
+        public const string FillRegion = "editor_fill";
+        public const string ClearRegion = "editor_clear";
+        public const string Capture = "editor_capture";
+        public const string Stamp = "editor_stamp";
+        public const string ToggleBuild = "toggle_build";
     }
 }

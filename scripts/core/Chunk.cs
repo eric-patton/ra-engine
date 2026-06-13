@@ -35,6 +35,13 @@ public sealed partial class Chunk : Node3D
         Dirty = true;
     }
 
+    public void RecomputeSolid()
+    {
+        SolidCount = 0;
+        for (int i = 0; i < Volume; i++)
+            if (Blocks[i] != 0) SolidCount++;
+    }
+
     public override void _Ready()
     {
         Position = Coord * Size;

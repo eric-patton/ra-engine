@@ -104,6 +104,15 @@ public sealed partial class VoxelWorld : Node3D
         return ch;
     }
 
+    /// <summary>Bulk-load a chunk's block data (used by world load). Marks it dirty.</summary>
+    public void LoadChunk(Vector3I coord, ushort[] data)
+    {
+        var ch = GetOrCreate(coord);
+        System.Array.Copy(data, ch.Blocks, Chunk.Volume);
+        ch.RecomputeSolid();
+        MarkDirty(coord);
+    }
+
     private void MarkDirty(Vector3I coord)
     {
         if (!_chunks.TryGetValue(coord, out var ch)) return;

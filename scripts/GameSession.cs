@@ -20,6 +20,7 @@ public partial class GameSession : Node3D
     public Player Player { get; private set; }
     public GameHud Hud { get; private set; }
     public BlockInteractor Interactor { get; private set; }
+    public BuildEditor Editor { get; private set; }
     public WeaponController Weapons { get; private set; }
     public DialogueBox Dialogue { get; private set; }
     public Narrator Narrator { get; private set; }
@@ -55,6 +56,9 @@ public partial class GameSession : Node3D
         Interactor = new BlockInteractor { Name = "Interactor", World = World, Player = Player, Hotbar = Hud.Hotbar };
         AddChild(Interactor);
 
+        Editor = new BuildEditor { Name = "Editor", World = World, Interactor = Interactor, Hotbar = Hud.Hotbar, Hud = Hud };
+        AddChild(Editor);
+
         Weapons = new WeaponController { Name = "Weapons", Player = Player, ProjectileParent = this };
         Player.AddChild(Weapons);
         Weapons.AttachViewmodel();
@@ -79,6 +83,12 @@ public partial class GameSession : Node3D
     public override void _Process(double delta)
     {
         if (Player == null || InDialogue) return;
+
+        if (Input.IsActionJustPressed(GameInput.Actions.ToggleBuild) && Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            SetMode(CurrentMode == Mode.Build ? Mode.Adventure : Mode.Build);
+            Hud.ShowBanner(CurrentMode == Mode.Build ? "Build mode" : "Adventure mode", 1.5f);
+        }
 
         // find the nearest talkable NPC within reach
         Npc best = null;
@@ -128,6 +138,7 @@ public partial class GameSession : Node3D
         CurrentMode = mode;
         bool build = mode == Mode.Build;
         Interactor.CanEdit = build;
+        Editor.SetEnabled(build);
         Weapons.SetEnabled(!build);
         Hud.SetHotbarVisible(build);
         Hud.SetWeaponVisible(!build);

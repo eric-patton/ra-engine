@@ -50,6 +50,9 @@ public partial class Game : Node3D
             case "--test-npc":
                 RunNpcTest();
                 break;
+            case "--test-save":
+                RunSaveTest();
+                break;
             default:
                 StartSandbox();
                 break;
@@ -68,6 +71,50 @@ public partial class Game : Node3D
         session.World.MarkAllDirty();
         session.World.RebuildAllNow();
         session.Hud.ShowBanner("Sandbox — build freely! (G toggles fly)", 4f);
+    }
+
+    private void RunSaveTest()
+    {
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        Core.WorldGen.Showcase(world);
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+
+        // snapshot a region
+        var snap = new System.Collections.Generic.Dictionary<Vector3I, ushort>();
+        for (int x = -2; x <= 24; x++)
+        for (int y = -3; y <= 6; y++)
+        for (int z = -2; z <= 18; z++)
+        {
+            ushort id = world.GetBlockId(x, y, z);
+            if (id != 0) snap[new Vector3I(x, y, z)] = id;
+        }
+
+        const string path = "user://worlds/test.rworld";
+        Core.WorldIO.SaveWorld(world, path);
+
+        // capture a prefab, then clear and reload
+        var prefab = Core.WorldIO.Capture(world, new Vector3I(0, 0, 0), new Vector3I(2, 2, 2));
+        world.Clear();
+        int afterClear = world.GetBlockId(0, 0, 0);
+        Core.WorldIO.LoadWorld(world, path);
+
+        int mismatches = 0, chec_d = 0;
+        foreach (var kv in snap)
+        {
+            chec_d++;
+            if (world.GetBlockId(kv.Key) != kv.Value) mismatches++;
+        }
+
+        // stamp the prefab into empty space and verify its corner block matches
+        Core.WorldIO.Stamp(world, prefab, new Vector3I(60, 1, 60));
+        ushort expectedCorner = Core.BlockRegistry.IdOf(prefab.Palette[prefab.Cells[prefab.Index(0, 0, 0)]]);
+        bool stampOk = world.GetBlockId(60, 1, 60) == expectedCorner;
+
+        GD.Print($"[RA] save-test: snapshot={chec_d} mismatches={mismatches} clearedTo={afterClear} " +
+                 $"prefab={prefab.Size.X}x{prefab.Size.Y}x{prefab.Size.Z} stampOk={stampOk}");
+        QuitSoon();
     }
 
     private async void RunNpcTest()
