@@ -21,9 +21,9 @@ public static class Scenery
             BackgroundMode = Godot.Environment.BGMode.Sky,
             Sky = sky,
             AmbientLightSource = Godot.Environment.AmbientSource.Sky,
-            AmbientLightSkyContribution = 0.6f,
+            AmbientLightSkyContribution = 0.45f,
             TonemapMode = Godot.Environment.ToneMapper.Filmic,
-            TonemapWhite = 6f,
+            TonemapWhite = 5f,
             SsaoEnabled = true,
             SsaoRadius = 1.2f,
             SsaoIntensity = 1.5f,
@@ -44,8 +44,8 @@ public static class Scenery
         {
             Name = "Sun",
             ShadowEnabled = true,
-            LightEnergy = 1.15f,
-            LightColor = new Color(1f, 0.96f, 0.88f),
+            LightEnergy = 1.35f,
+            LightColor = new Color(1f, 0.95f, 0.86f),
         };
         sun.RotationDegrees = new Vector3(-52f, -130f, 0f);
         sun.DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel4Splits;

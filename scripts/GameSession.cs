@@ -24,9 +24,11 @@ public partial class GameSession : Node3D
     public WeaponController Weapons { get; private set; }
     public DialogueBox Dialogue { get; private set; }
     public Narrator Narrator { get; private set; }
+    public PauseMenu Pause { get; private set; }
     public Mode CurrentMode { get; private set; }
     public bool InDialogue { get; private set; }
     public float InteractRange = 3.8f;
+    public System.Action ReturnToMenuRequested;
 
     public static readonly string[] DefaultPalette =
     {
@@ -71,6 +73,11 @@ public partial class GameSession : Node3D
         AddChild(Dialogue);
         Dialogue.Finished += OnDialogueFinished;
 
+        Pause = new PauseMenu { Name = "PauseMenu" };
+        Pause.CanPause = () => !InDialogue;
+        Pause.OnReturnToMenu = () => ReturnToMenuRequested?.Invoke();
+        AddChild(Pause);
+
         Player.HealthChanged += Hud.SetHealth;
         Player.AirChanged += Hud.SetAir;
 
@@ -82,7 +89,9 @@ public partial class GameSession : Node3D
 
     public override void _Process(double delta)
     {
-        if (Player == null || InDialogue) return;
+        if (Player == null) return;
+        Hud.SetUnderwater(Player.HeadUnderwater);
+        if (InDialogue) return;
 
         if (Input.IsActionJustPressed(GameInput.Actions.ToggleBuild) && Input.MouseMode == Input.MouseModeEnum.Captured)
         {

@@ -78,14 +78,10 @@ public partial class Player : CharacterBody3D, IDamageable
 
         if (e is InputEventMouseMotion mm && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
-            RotateY(-mm.Relative.X * MouseSensitivity);
-            float pitch = Mathf.Clamp(_head.Rotation.X - mm.Relative.Y * MouseSensitivity, -1.5f, 1.5f);
+            float sens = MouseSensitivity * Core.Settings.MouseSensitivity;
+            RotateY(-mm.Relative.X * sens);
+            float pitch = Mathf.Clamp(_head.Rotation.X - mm.Relative.Y * sens, -1.5f, 1.5f);
             _head.Rotation = new Vector3(pitch, 0, 0);
-        }
-        else if (e.IsActionPressed(GameInput.Actions.Pause))
-        {
-            Input.MouseMode = Input.MouseMode == Input.MouseModeEnum.Captured
-                ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured;
         }
         else if (e.IsActionPressed(GameInput.Actions.ToggleMode))
         {

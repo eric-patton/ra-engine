@@ -16,7 +16,7 @@ public interface ILesson
 }
 
 /// <summary>Catalogue of available lessons (used by the menu and CLI).</summary>
-public static class Lessons
+public static class LessonCatalog
 {
     private static readonly List<ILesson> All = new()
     {

@@ -9,10 +9,14 @@ namespace RAEngine;
 /// </summary>
 public partial class Game : Node3D
 {
+    private GameSession _session;
+    private UI.MainMenu _menu;
+
     public override void _Ready()
     {
         var version = (string)Engine.GetVersionInfo()["string"];
         GD.Print($"[RA] Game ready on Godot {version}");
+        Core.Settings.Load();
 
         string mode = null;
         foreach (string arg in OS.GetCmdlineUserArgs())
@@ -54,44 +58,68 @@ public partial class Game : Node3D
                 RunSaveTest();
                 break;
             case "--lesson-david":
-                StartLesson(Lessons.Lessons.Get("david"));
+                StartLesson(Lessons.LessonCatalog.Get("david"));
                 break;
             case "--test-lesson":
                 RunLessonTest();
                 break;
+            case "--test-menu":
+                RunMenuTest();
+                break;
+            case "--menu":
             default:
-                StartSandbox();
+                ShowMainMenu();
                 break;
         }
     }
 
     private void QuitSoon() => GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
 
-    /// <summary>Default run: a flat creative world for free building.</summary>
+    // ---- menu / session flow ---------------------------------------------
+
+    private void ShowMainMenu()
+    {
+        GetTree().Paused = false;
+        if (_session != null) { _session.QueueFree(); _session = null; }
+        _menu = new UI.MainMenu { Name = "MainMenu" };
+        _menu.OnPlayLesson = id => StartLesson(Lessons.LessonCatalog.Get(id));
+        _menu.OnSandbox = StartSandbox;
+        _menu.OnQuit = () => GetTree().Quit();
+        AddChild(_menu);
+    }
+
+    private void ClearMenu()
+    {
+        if (_menu != null) { _menu.QueueFree(); _menu = null; }
+    }
+
+    /// <summary>A flat creative world for free building and pre-building levels.</summary>
     private void StartSandbox()
     {
-        var session = new GameSession { Name = "Session" };
-        AddChild(session);
-        session.Setup(new Vector3(24, 3, 24), creative: true);
-        Core.WorldGen.FlatGround(session.World, -8, 56, -8, 56, 0);
-        session.World.MarkAllDirty();
-        session.World.RebuildAllNow();
-        session.Hud.ShowBanner("Sandbox — build freely! (G toggles fly)", 4f);
+        ClearMenu();
+        _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
+        AddChild(_session);
+        _session.Setup(new Vector3(24, 3, 24), creative: true);
+        Core.WorldGen.FlatGround(_session.World, -16, 64, -16, 64, 0);
+        _session.World.MarkAllDirty();
+        _session.World.RebuildAllNow();
+        _session.Hud.ShowBanner("Sandbox — build freely!  (G fly · B mode · F5 save · F9 load)", 5f);
     }
 
     private GameSession StartLesson(Lessons.ILesson lesson)
     {
-        var session = new GameSession { Name = "Session" };
-        AddChild(session);
-        session.Setup(lesson.Spawn, creative: false);
-        lesson.Build(session);
-        session.Hud.ShowBanner($"{lesson.Title}", 4f);
-        return session;
+        ClearMenu();
+        _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
+        AddChild(_session);
+        _session.Setup(lesson.Spawn, creative: false);
+        lesson.Build(_session);
+        _session.Hud.ShowBanner($"{lesson.Title}", 4f);
+        return _session;
     }
 
     private async void RunLessonTest()
     {
-        var lesson = Lessons.Lessons.Get("david");
+        var lesson = Lessons.LessonCatalog.Get("david");
         var session = new GameSession { Name = "Session" };
         AddChild(session);
         session.Setup(lesson.Spawn, creative: false, captureMouse: false);
@@ -132,6 +160,20 @@ public partial class Game : Node3D
 
         GD.Print($"[RA] lesson-test: jesseTalked={talked} goliathWoke={woke} goliathDefeated={defeated}");
         await Capture("res://_lesson_victory.png", 0.3);
+        GetTree().Quit(0);
+    }
+
+    private async void RunMenuTest()
+    {
+        ShowMainMenu();
+        await ToSignal(GetTree().CreateTimer(0.5), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_menu.png", 0.2);
+
+        // simulate clicking "Play: David and Goliath"
+        _menu.OnPlayLesson("david");
+        await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_menu_lesson.png", 0.2);
+        GD.Print($"[RA] menu-test: sessionStarted={_session != null} menuCleared={_menu == null}");
         GetTree().Quit(0);
     }
 

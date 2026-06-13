@@ -17,8 +17,11 @@ public partial class GameHud : CanvasLayer
     private Control _crosshair;
     private Label _weaponLabel;
 
+    private ColorRect _underwater;
+
     public override void _Ready()
     {
+        BuildUnderwater();
         BuildCrosshair();
         BuildHotbar();
         BuildBars();
@@ -27,6 +30,16 @@ public partial class GameHud : CanvasLayer
         BuildInteractPrompt();
         BuildObjectives();
     }
+
+    private void BuildUnderwater()
+    {
+        _underwater = new ColorRect { Color = new Color(0.12f, 0.36f, 0.55f, 0f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        _underwater.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        AddChild(_underwater);
+    }
+
+    public void SetUnderwater(bool on) =>
+        _underwater.Color = new Color(0.12f, 0.36f, 0.55f, on ? 0.34f : 0f);
 
     private void BuildWeaponLabel()
     {
@@ -115,10 +128,10 @@ public partial class GameHud : CanvasLayer
     private void RelayoutObjectives()
     {
         Vector2 vp = GetViewport().GetVisibleRect().Size;
-        _objectives.Position = new Vector2(vp.X - 320, 20);
-        _objectives.Size = new Vector2(300, 200);
-        _center.Position = new Vector2(vp.X * 0.15f, vp.Y * 0.35f);
-        _center.Size = new Vector2(vp.X * 0.7f, vp.Y * 0.3f);
+        _objectives.Position = new Vector2(vp.X - 296, 20);
+        _objectives.Size = new Vector2(280, 200);
+        _center.Position = new Vector2(vp.X * 0.15f, vp.Y * 0.34f);
+        _center.Size = new Vector2(vp.X * 0.7f, vp.Y * 0.32f);
     }
 
     public void SetObjectives(System.Collections.Generic.IEnumerable<string> items)
@@ -139,7 +152,7 @@ public partial class GameHud : CanvasLayer
             l.AddThemeColorOverride("font_outline_color", Colors.Black);
             l.AddThemeConstantOverride("outline_size", 4);
             l.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-            l.CustomMinimumSize = new Vector2(300, 0);
+            l.CustomMinimumSize = new Vector2(272, 0);
             _objectives.AddChild(l);
             _objLabels.Add(l);
             _objText.Add(s);
