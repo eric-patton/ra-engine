@@ -21,6 +21,11 @@ public partial class Game : Node3D
                 GD.Print("[RA] smoke: C# assembly loaded OK");
                 GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
             }
+            else if (arg == "--gen-textures")
+            {
+                Tools.TextureForge.GenerateAll();
+                GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
+            }
         }
     }
 }
