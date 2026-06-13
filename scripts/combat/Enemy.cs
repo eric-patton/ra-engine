@@ -61,6 +61,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
 
     public override void _Ready()
     {
+        AddToGroup("enemy");
         MaxHealth = Type.Health;
         Health = MaxHealth;
         float s = Type.Scale;

@@ -135,6 +135,15 @@ public partial class DialogueBox : CanvasLayer
         else ShowNode(_current.Next);
     }
 
+    public bool HasChoices => _current?.Choices is { Count: > 0 };
+
+    /// <summary>Pick the i-th choice of the current line (for scripts/tests).</summary>
+    public void Choose(int i)
+    {
+        if (!Active || _current?.Choices is not { } cs || i < 0 || i >= cs.Count) return;
+        ShowNode(cs[i].Next);
+    }
+
     private void Finish()
     {
         Active = false;

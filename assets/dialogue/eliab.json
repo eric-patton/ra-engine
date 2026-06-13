@@ -1,0 +1,8 @@
+{
+  "start": "0",
+  "nodes": {
+    "0": { "speaker": "Eliab", "text": "David! Why have you come down here? With whom did you leave those few sheep in the wilderness?", "next": "1" },
+    "1": { "speaker": "Eliab", "text": "I know your pride and the mischief of your heart -- you came only to watch the battle.", "next": "2" },
+    "2": { "speaker": "Eliab", "text": "...Go on, then. Goliath waits beyond the brook. Not one man among us dares to face him.", "next": null }
+  }
+}

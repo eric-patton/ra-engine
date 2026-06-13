@@ -1,0 +1,13 @@
+{
+  "start": "0",
+  "nodes": {
+    "0": { "speaker": "Jesse", "text": "David, my son. Your brothers march with King Saul against the Philistines in the Valley of Elah.", "next": "1" },
+    "1": { "speaker": "Jesse", "text": "Take this grain and these loaves of bread to them, and bring back word of how they fare.", "next": "2" },
+    "2": { "speaker": "Jesse", "text": "Will you go for me?", "choices": [
+        { "text": "I will go, father.", "next": "yes" },
+        { "text": "What of the giant they speak of?", "next": "ask" }
+      ] },
+    "ask": { "speaker": "Jesse", "text": "Goliath of Gath. Forty days he has defied the armies of the living God. But do not fear him -- the battle belongs to the LORD.", "next": "yes" },
+    "yes": { "speaker": "Jesse", "text": "Go quickly, and may the LORD be with you. Cross the valley to the battle line.", "next": null }
+  }
+}

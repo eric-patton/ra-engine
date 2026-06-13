@@ -104,12 +104,20 @@ public partial class GameSession : Node3D
         {
             Hud.SetInteractPrompt($"[E]  Talk to {best.NpcName}");
             if (Input.IsActionJustPressed(GameInput.Actions.Interact))
-                StartDialogue(best.Dialogue);
+                StartDialogueWith(best);
         }
         else
         {
             Hud.SetInteractPrompt("");
         }
+    }
+
+    private Npc _talkingNpc;
+
+    public void StartDialogueWith(Npc npc)
+    {
+        _talkingNpc = npc;
+        StartDialogue(npc.Dialogue);
     }
 
     public void StartDialogue(DialogueData data)
@@ -130,6 +138,9 @@ public partial class GameSession : Node3D
         Player.InputEnabled = true;
         SetMode(CurrentMode); // restores weapon/build interaction for the mode
         Input.MouseMode = Input.MouseModeEnum.Captured;
+        var npc = _talkingNpc;
+        _talkingNpc = null;
+        npc?.EmitSignal(Npc.SignalName.Talked);
     }
 
     /// <summary>Switch between block-building and weapon-combat interaction.</summary>

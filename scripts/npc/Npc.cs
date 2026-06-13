@@ -9,6 +9,8 @@ namespace RAEngine.NpcSys;
 /// model with friendly colours.</summary>
 public partial class Npc : CharacterBody3D
 {
+    [Signal] public delegate void TalkedEventHandler();
+
     public string NpcName = "Villager";
     public DialogueData Dialogue;
     public Color Skin = new(0.85f, 0.7f, 0.55f);

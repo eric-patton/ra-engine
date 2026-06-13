@@ -7,6 +7,8 @@ namespace RAEngine.World;
 /// enters it. Used to pace a lesson's story beats as the player explores.</summary>
 public partial class NarrationTrigger : Area3D
 {
+    [Signal] public delegate void EnteredEventHandler();
+
     public string[] Lines = System.Array.Empty<string>();
     public bool Once = true;
     public Narrator Narrator;
@@ -28,5 +30,6 @@ public partial class NarrationTrigger : Area3D
         if (body is not PlayerSys.Player) return;
         _fired = true;
         Narrator?.ShowMany(Lines);
+        EmitSignal(SignalName.Entered);
     }
 }

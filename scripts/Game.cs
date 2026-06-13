@@ -53,6 +53,12 @@ public partial class Game : Node3D
             case "--test-save":
                 RunSaveTest();
                 break;
+            case "--lesson-david":
+                StartLesson(Lessons.Lessons.Get("david"));
+                break;
+            case "--test-lesson":
+                RunLessonTest();
+                break;
             default:
                 StartSandbox();
                 break;
@@ -71,6 +77,62 @@ public partial class Game : Node3D
         session.World.MarkAllDirty();
         session.World.RebuildAllNow();
         session.Hud.ShowBanner("Sandbox — build freely! (G toggles fly)", 4f);
+    }
+
+    private GameSession StartLesson(Lessons.ILesson lesson)
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(lesson.Spawn, creative: false);
+        lesson.Build(session);
+        session.Hud.ShowBanner($"{lesson.Title}", 4f);
+        return session;
+    }
+
+    private async void RunLessonTest()
+    {
+        var lesson = Lessons.Lessons.Get("david");
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(lesson.Spawn, creative: false, captureMouse: false);
+        lesson.Build(session);
+        session.Player.InputEnabled = false;
+
+        await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_lesson.png", 0.3);
+
+        // 1. talk to Jesse
+        NpcSys.Npc jesse = null;
+        foreach (Node n in GetTree().GetNodesInGroup("npc"))
+            if (n is NpcSys.Npc npc && npc.NpcName == "Jesse") jesse = npc;
+        bool talked = false;
+        if (jesse != null) jesse.Talked += () => talked = true;
+        session.StartDialogueWith(jesse);
+        int g = 0;
+        while (session.InDialogue && g++ < 20)
+        {
+            if (session.Dialogue.HasChoices) session.Dialogue.Choose(0);
+            else session.Dialogue.Advance();
+            await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
+        }
+
+        // 2. cross the battle line -> wakes Goliath
+        Combat.Enemy goliath = null;
+        foreach (Node n in GetTree().GetNodesInGroup("enemy"))
+            if (n is Combat.Enemy e && e.Type.Name == "Goliath") goliath = e;
+        bool defeated = false;
+        if (goliath != null) goliath.Defeated += () => defeated = true;
+        session.Player.GlobalPosition = new Vector3(32, 2, 26);
+        await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
+        bool woke = goliath != null && goliath.Target != null;
+
+        // 3. defeat Goliath
+        goliath?.TakeDamage(9999, session.Player);
+        await ToSignal(GetTree().CreateTimer(0.8), SceneTreeTimer.SignalName.Timeout);
+
+        GD.Print($"[RA] lesson-test: jesseTalked={talked} goliathWoke={woke} goliathDefeated={defeated}");
+        await Capture("res://_lesson_victory.png", 0.3);
+        GetTree().Quit(0);
     }
 
     private void RunSaveTest()

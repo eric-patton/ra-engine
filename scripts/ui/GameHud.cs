@@ -25,6 +25,7 @@ public partial class GameHud : CanvasLayer
         BuildBanner();
         BuildWeaponLabel();
         BuildInteractPrompt();
+        BuildObjectives();
     }
 
     private void BuildWeaponLabel()
@@ -78,6 +79,86 @@ public partial class GameHud : CanvasLayer
         if (_interactPrompt == null) return;
         _interactPrompt.Text = text;
         _interactPrompt.Visible = !string.IsNullOrEmpty(text);
+    }
+
+    // ---- objectives + lesson completion ----------------------------------
+
+    private VBoxContainer _objectives;
+    private readonly System.Collections.Generic.List<Label> _objLabels = new();
+    private readonly System.Collections.Generic.List<string> _objText = new();
+    private Label _center;
+
+    private void BuildObjectives()
+    {
+        _objectives = new VBoxContainer { Name = "Objectives" };
+        _objectives.AddThemeConstantOverride("separation", 4);
+        AddChild(_objectives);
+
+        _center = new Label
+        {
+            Visible = false,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        _center.AddThemeFontSizeOverride("font_size", 40);
+        _center.AddThemeColorOverride("font_color", new Color(1f, 0.92f, 0.55f));
+        _center.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _center.AddThemeConstantOverride("outline_size", 8);
+        _center.MouseFilter = Control.MouseFilterEnum.Ignore;
+        AddChild(_center);
+
+        GetViewport().SizeChanged += RelayoutObjectives;
+        RelayoutObjectives();
+    }
+
+    private void RelayoutObjectives()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        _objectives.Position = new Vector2(vp.X - 320, 20);
+        _objectives.Size = new Vector2(300, 200);
+        _center.Position = new Vector2(vp.X * 0.15f, vp.Y * 0.35f);
+        _center.Size = new Vector2(vp.X * 0.7f, vp.Y * 0.3f);
+    }
+
+    public void SetObjectives(System.Collections.Generic.IEnumerable<string> items)
+    {
+        foreach (Node c in _objectives.GetChildren()) c.QueueFree();
+        _objLabels.Clear();
+        _objText.Clear();
+        var title = new Label { Text = "Objectives" };
+        title.AddThemeFontSizeOverride("font_size", 18);
+        title.AddThemeColorOverride("font_color", new Color(1f, 0.9f, 0.55f));
+        title.AddThemeColorOverride("font_outline_color", Colors.Black);
+        title.AddThemeConstantOverride("outline_size", 4);
+        _objectives.AddChild(title);
+        foreach (string s in items)
+        {
+            var l = new Label { Text = "☐  " + s };
+            l.AddThemeFontSizeOverride("font_size", 16);
+            l.AddThemeColorOverride("font_outline_color", Colors.Black);
+            l.AddThemeConstantOverride("outline_size", 4);
+            l.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            l.CustomMinimumSize = new Vector2(300, 0);
+            _objectives.AddChild(l);
+            _objLabels.Add(l);
+            _objText.Add(s);
+        }
+    }
+
+    public void CompleteObjective(int i)
+    {
+        if (i < 0 || i >= _objLabels.Count) return;
+        _objLabels[i].Text = "☑  " + _objText[i];
+        _objLabels[i].Modulate = new Color(0.6f, 1f, 0.6f, 0.85f);
+    }
+
+    public void ShowCenter(string text, float seconds = 0f)
+    {
+        _center.Text = text;
+        _center.Visible = !string.IsNullOrEmpty(text);
+        if (seconds > 0)
+            GetTree().CreateTimer(seconds).Timeout += () => _center.Visible = false;
     }
 
     public void Configure(BlockTextures tex, IEnumerable<ushort> palette)
