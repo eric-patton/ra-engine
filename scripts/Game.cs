@@ -14,35 +14,85 @@ public partial class Game : Node3D
         var version = (string)Engine.GetVersionInfo()["string"];
         GD.Print($"[RA] Game ready on Godot {version}");
 
+        string mode = null;
         foreach (string arg in OS.GetCmdlineUserArgs())
+            if (arg.StartsWith("--")) mode = arg;
+
+        switch (mode)
         {
-            if (arg == "--smoke")
-            {
+            case "--smoke":
                 GD.Print("[RA] smoke: C# assembly loaded OK");
-                GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
-            }
-            else if (arg == "--gen-textures")
-            {
+                QuitSoon();
+                break;
+            case "--gen-textures":
                 Tools.TextureForge.GenerateAll();
-                GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
-            }
-            else if (arg == "--test-blocks")
-            {
+                QuitSoon();
+                break;
+            case "--test-blocks":
                 Core.BlockRegistry.EnsureInit();
                 var tex = Core.BlockTextures.Build();
                 GD.Print($"[RA] test-blocks: blocks={Core.BlockRegistry.Count} layers={tex.LayerCount} " +
                          $"grass.top.layer={Core.BlockRegistry.Get("grass").FaceLayer[(int)Core.Face.PosY]}");
-                GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
-            }
-            else if (arg == "--test-world")
-            {
+                QuitSoon();
+                break;
+            case "--test-world":
                 RunWorldTest();
-            }
-            else if (arg == "--test-player")
-            {
+                break;
+            case "--test-player":
                 RunPlayerTest();
-            }
+                break;
+            case "--test-hud":
+                RunHudTest();
+                break;
+            default:
+                StartSandbox();
+                break;
         }
+    }
+
+    private void QuitSoon() => GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
+
+    /// <summary>Default run: a flat creative world for free building.</summary>
+    private void StartSandbox()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 3, 24), creative: true);
+        Core.WorldGen.FlatGround(session.World, -8, 56, -8, 56, 0);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Hud.ShowBanner("Sandbox — build freely! (G toggles fly)", 4f);
+    }
+
+    private async void RunHudTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 24), creative: true);
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        // a pillar to target straight ahead (-Z)
+        for (int y = 1; y <= 3; y++)
+            session.World.SetBlock(24, y, 18, Core.BlockRegistry.IdOf("stone"), false);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+
+        // look slightly down toward the pillar so the selection outline shows
+        session.Player.Head.Rotation = new Vector3(-0.25f, 0, 0);
+        session.Hud.ShowBanner("Block interaction test", 5f);
+
+        await ToSignal(GetTree().CreateTimer(0.8), SceneTreeTimer.SignalName.Timeout);
+
+        // exercise place/break logic directly (deterministic, no input needed)
+        bool placed = session.Interactor.PlaceAt(new Vector3I(24, 4, 18), Core.BlockRegistry.IdOf("gold_block"));
+        bool broke = session.Interactor.BreakAt(new Vector3I(24, 1, 18));
+        var hit = Core.VoxelRay.Cast(session.World, session.Player.Camera.GlobalPosition,
+            -session.Player.Camera.GlobalTransform.Basis.Z, 6f);
+        GD.Print($"[RA] hud-test: placed={placed} broke={broke} rayHit={hit.Ok} hitBlock={hit.Block} " +
+                 $"afterPlace={Core.BlockRegistry.Get(session.World.GetBlockId(24, 4, 18)).Name} " +
+                 $"afterBreak={Core.BlockRegistry.Get(session.World.GetBlockId(24, 1, 18)).Name}");
+
+        await Capture("res://_hud.png", 0.4);
+        GetTree().Quit(0);
     }
 
     private async void RunPlayerTest()

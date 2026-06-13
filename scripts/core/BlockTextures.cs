@@ -83,6 +83,28 @@ public sealed class BlockTextures
 
     public int LayerFor(string name) => _layerOf.TryGetValue(name, out int l) ? l : 0;
 
+    private readonly Dictionary<ushort, Texture2D> _icons = new();
+
+    /// <summary>A small Texture2D for UI (hotbar/inventory), from the block's
+    /// representative face albedo. Cached per block id.</summary>
+    public Texture2D GetIcon(BlockType b)
+    {
+        if (_icons.TryGetValue(b.Id, out var cached)) return cached;
+        string name = b.FaceTex[(int)Face.PosZ] ?? b.FaceTex[(int)Face.PosY];
+        Texture2D tex = null;
+        if (!string.IsNullOrEmpty(name))
+        {
+            string path = $"{Root}/{name}/albedo.png";
+            if (FileAccess.FileExists(path))
+            {
+                var img = Image.LoadFromFile(path);
+                if (img != null) tex = ImageTexture.CreateFromImage(img);
+            }
+        }
+        _icons[b.Id] = tex;
+        return tex;
+    }
+
     // ---- helpers ----------------------------------------------------------
 
     private static Texture2DArray MakeArray(Godot.Collections.Array<Image> imgs)

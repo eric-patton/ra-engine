@@ -1,0 +1,53 @@
+using System.Collections.Generic;
+using Godot;
+using RAEngine.Core;
+using RAEngine.PlayerSys;
+using RAEngine.UI;
+
+namespace RAEngine;
+
+/// <summary>Assembles a playable session: environment, voxel world, player, HUD
+/// and block interaction, all wired together. Reused by the sandbox and by
+/// lessons (which generate a world and configure objectives on top).</summary>
+public partial class GameSession : Node3D
+{
+    public VoxelWorld World { get; private set; }
+    public Player Player { get; private set; }
+    public GameHud Hud { get; private set; }
+    public BlockInteractor Interactor { get; private set; }
+
+    public static readonly string[] DefaultPalette =
+    {
+        "grass", "dirt", "stone", "cobblestone", "planks", "oak_log", "mud_brick", "leaves", "lamp",
+    };
+
+    public void Setup(Vector3 spawn, bool creative, IEnumerable<string> palette = null, bool captureMouse = true)
+    {
+        Scenery.AddDaylight(this);
+
+        World = new VoxelWorld { Name = "World" };
+        AddChild(World); // _Ready builds textures + material
+
+        Player = new Player { Name = "Player", World = World };
+        AddChild(Player);
+        Player.SetCreative(creative);
+        Player.GlobalPosition = spawn;
+
+        Hud = new GameHud { Name = "Hud" };
+        AddChild(Hud);
+
+        var ids = new List<ushort>();
+        foreach (string n in palette ?? DefaultPalette)
+            if (BlockRegistry.TryId(n, out ushort id)) ids.Add(id);
+        Hud.Configure(World.Textures, ids);
+
+        Interactor = new BlockInteractor { Name = "Interactor", World = World, Player = Player, Hotbar = Hud.Hotbar };
+        AddChild(Interactor);
+
+        Player.HealthChanged += Hud.SetHealth;
+        Player.AirChanged += Hud.SetAir;
+
+        if (captureMouse) Player.MakeCurrent();
+        else Player.Camera.Current = true;
+    }
+}
