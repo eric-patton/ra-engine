@@ -1,0 +1,32 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+/.import/
+
+# .NET / C# (Mono build)
+.mono/
+/bin/
+/obj/
+*.user
+mono_crash.*.json
+
+# Exported builds
+/build/
+*.exe
+*.pck
+*.zip
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+
+# godot-ai MCP editor plugin (a dev tool, lives at C:\repos\external\godot-ai) — local-only, not published
+/addons/godot_ai/
+
+# Session scratch (debug runs, screenshots)
+run_*.log
+_startup_*.txt
+_*.png
+_*.png.import
+/shots/
+.lastpid
