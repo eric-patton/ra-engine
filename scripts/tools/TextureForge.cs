@@ -421,26 +421,27 @@ public static class TextureForge
     private static TexSet Cloth(int s, Color baseC, Color lightC, int seed)
     {
         var t = NewSet(s);
-        Color dark = LerpCol(baseC, Colors.Black, 0.25f);
+        Color dark = LerpCol(baseC, Colors.Black, 0.28f);
+        const int cell = 4; // pixels per woven thread
         for (int y = 0; y < s; y++)
         for (int x = 0; x < s; x++)
         {
             float u = x / (float)s, v = y / (float)s;
-            // woven weave: interleaved warp/weft
-            float warp = (float)Math.Sin(u * s * Math.PI);
-            float weft = (float)Math.Sin(v * s * Math.PI);
-            float weave = (warp * weft) * 0.5f + 0.5f;
-            float stripe = ((int)(v * 8) % 4 == 0) ? 0.85f : 1f; // subtle banded pattern
+            // basket weave: alternate which thread is "over" in a checkerboard,
+            // and round each thread with a sine across its own axis.
+            int tx = x / cell, ty = y / cell;
+            bool warpOver = ((tx + ty) & 1) == 0;
+            float fx = (x % cell) / (float)cell, fy = (y % cell) / (float)cell;
+            float shade = warpOver ? (float)Math.Sin(fx * Math.PI) : (float)Math.Sin(fy * Math.PI);
             float n = Fbm(u, v, 16, 2, seed);
-            Color col = LerpCol(dark, baseC, weave);
-            col = LerpCol(col, lightC, Math.Max(0, n - 0.6f) * 0.8f);
-            col = LerpCol(col, dark, (1 - stripe));
+            Color col = LerpCol(dark, baseC, 0.45f + shade * 0.5f);
+            col = LerpCol(col, lightC, Math.Max(0, n - 0.62f) * 0.7f);
             int i = y * s + x;
             t.Albedo[i] = col;
-            t.Height[i] = 0.4f + weave * 0.5f;
+            t.Height[i] = 0.35f + shade * 0.6f;
             t.Rough[i] = 0.85f + n * 0.1f;
         }
-        t.NormalStrength = 1.0f;
+        t.NormalStrength = 1.5f;
         return t;
     }
 

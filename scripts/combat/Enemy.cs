@@ -98,7 +98,8 @@ public partial class Enemy : CharacterBody3D, IDamageable
             Vector3 to = Target.GlobalPosition - GlobalPosition;
             var flat = new Vector3(to.X, 0, to.Z);
             float dist = flat.Length();
-            if (dist > 0.05f) RotationDegrees = new Vector3(0, Mathf.RadToDeg(Mathf.Atan2(flat.X, flat.Z)), 0);
+            // model's face is on -Z, so add PI to point the front toward the player
+            if (dist > 0.05f) RotationDegrees = new Vector3(0, Mathf.RadToDeg(Mathf.Atan2(flat.X, flat.Z) + Mathf.Pi), 0);
 
             if (dist > Type.AttackRange)
             {
@@ -187,7 +188,6 @@ public partial class Enemy : CharacterBody3D, IDamageable
             OneShot = true,
             Emitting = true,
             Explosiveness = 0.9f,
-            Position = new Vector3(0, _capsule.Height * 0.5f, 0),
         };
         var mat = new ParticleProcessMaterial
         {
@@ -202,6 +202,11 @@ public partial class Enemy : CharacterBody3D, IDamageable
         };
         p.ProcessMaterial = mat;
         p.DrawPass1 = new QuadMesh { Size = new Vector2(0.3f, 0.3f) };
-        AddChild(p);
+        // Parent to the world (not this enemy, which is about to be freed) so the
+        // poof plays out its full lifetime, then frees itself.
+        var parent = GetParent();
+        parent.AddChild(p);
+        p.GlobalPosition = GlobalPosition + new Vector3(0, _capsule.Height * 0.5f, 0);
+        GetTree().CreateTimer(1.3).Timeout += () => { if (GodotObject.IsInstanceValid(p)) p.QueueFree(); };
     }
 }

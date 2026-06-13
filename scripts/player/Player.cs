@@ -207,13 +207,17 @@ public partial class Player : CharacterBody3D, IDamageable
     {
         if (World == null) { InWater = HeadUnderwater = false; return; }
         Vector3 p = GlobalPosition;
+        float eye = _crouching ? EyeCrouch : EyeStand;
         InWater = World.GetBlock(FloorV(p + new Vector3(0, 0.5f, 0))).IsLiquid;
-        HeadUnderwater = World.GetBlock(FloorV(p + new Vector3(0, EyeStand, 0))).IsLiquid;
+        HeadUnderwater = World.GetBlock(FloorV(p + new Vector3(0, eye, 0))).IsLiquid;
     }
 
     private void UpdateCrouch()
     {
         bool want = InputEnabled && !Creative && !InWater && Input.IsActionPressed(GameInput.Actions.Crouch);
+        // don't stand up into a solid block overhead
+        if (!want && _crouching && World != null && World.IsSolid(FloorV(GlobalPosition + new Vector3(0, StandHeight, 0))))
+            want = true;
         if (want == _crouching) return;
         _crouching = want;
         float h = _crouching ? CrouchHeight : StandHeight;
@@ -277,6 +281,7 @@ public partial class Player : CharacterBody3D, IDamageable
         IsDead = false;
         Health = MaxHealth;
         Air = MaxAir;
+        _drownTimer = 0;
         Velocity = Vector3.Zero;
         GlobalPosition = at;
         _airApexY = at.Y;

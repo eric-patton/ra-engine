@@ -41,7 +41,7 @@ public partial class WeaponController : Node3D
     {
         Current = w;
         _viewmodel.Visible = Enabled && w != null;
-        if (_viewmodel.MaterialOverride is StandardMaterial3D m)
+        if (w != null && _viewmodel.MaterialOverride is StandardMaterial3D m)
             m.AlbedoColor = w.Ranged ? new Color(0.55f, 0.5f, 0.45f) : new Color(0.7f, 0.7f, 0.75f);
         EmitSignal(SignalName.WeaponChanged, w?.Name ?? "");
     }

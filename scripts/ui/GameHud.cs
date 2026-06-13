@@ -166,12 +166,15 @@ public partial class GameHud : CanvasLayer
         _objLabels[i].Modulate = new Color(0.6f, 1f, 0.6f, 0.85f);
     }
 
+    private int _centerToken;
+
     public void ShowCenter(string text, float seconds = 0f)
     {
         _center.Text = text;
         _center.Visible = !string.IsNullOrEmpty(text);
+        int token = ++_centerToken; // a newer ShowCenter invalidates older auto-hide timers
         if (seconds > 0)
-            GetTree().CreateTimer(seconds).Timeout += () => _center.Visible = false;
+            GetTree().CreateTimer(seconds).Timeout += () => { if (token == _centerToken) _center.Visible = false; };
     }
 
     public void Configure(BlockTextures tex, IEnumerable<ushort> palette)

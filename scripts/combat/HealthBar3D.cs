@@ -28,6 +28,7 @@ public partial class HealthBar3D : Node3D
             AlbedoColor = color,
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            BillboardKeepScale = true, // so the fill quad's X scale (health fraction) is honored
             Transparency = color.A < 1f ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled,
             NoDepthTest = true,
             RenderPriority = priority,

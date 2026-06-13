@@ -66,7 +66,7 @@ public partial class Npc : CharacterBody3D
             Vector3 to = _player.GlobalPosition - GlobalPosition;
             var flat = new Vector3(to.X, 0, to.Z);
             if (flat.LengthSquared() > 0.04f && flat.Length() < FaceRange)
-                RotationDegrees = new Vector3(0, Mathf.RadToDeg(Mathf.Atan2(flat.X, flat.Z)), 0);
+                RotationDegrees = new Vector3(0, Mathf.RadToDeg(Mathf.Atan2(flat.X, flat.Z) + Mathf.Pi), 0);
         }
     }
 }

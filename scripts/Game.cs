@@ -20,7 +20,7 @@ public partial class Game : Node3D
 
         string mode = null;
         foreach (string arg in OS.GetCmdlineUserArgs())
-            if (arg.StartsWith("--")) mode = arg;
+            if (arg.StartsWith("--")) { mode = arg; break; } // first flag wins, deterministically
 
         switch (mode)
         {

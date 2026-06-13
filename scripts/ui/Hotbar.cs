@@ -31,10 +31,14 @@ public partial class Hotbar : Control
         Select(0);
     }
 
+    private bool _connected;
+
     private void Build()
     {
         MouseFilter = MouseFilterEnum.Ignore;
         SetAnchorsPreset(LayoutPreset.FullRect);
+
+        foreach (Node c in GetChildren()) c.QueueFree(); // support reconfigure without leaking
 
         for (int i = 0; i < Slots; i++)
         {
@@ -71,7 +75,7 @@ public partial class Hotbar : Control
         _nameLabel.MouseFilter = MouseFilterEnum.Ignore;
         AddChild(_nameLabel);
 
-        GetViewport().SizeChanged += Relayout;
+        if (!_connected) { GetViewport().SizeChanged += Relayout; _connected = true; }
         Relayout();
     }
 
@@ -108,8 +112,9 @@ public partial class Hotbar : Control
 
     public void Select(int index)
     {
-        if (_blocks.Count == 0) return;
-        index = ((index % _blocks.Count) + _blocks.Count) % _blocks.Count;
+        int count = Mathf.Min(Slots, _blocks.Count); // only cycle through visible slots
+        if (count == 0) return;
+        index = ((index % count) + count) % count;
         if (_selected < Slots) _panels[_selected].AddThemeStyleboxOverride("panel", SlotStyle(false));
         _selected = index;
         if (_selected < Slots) _panels[_selected].AddThemeStyleboxOverride("panel", SlotStyle(true));

@@ -40,7 +40,9 @@ public partial class Projectile : Node3D
         }
 
         GlobalPosition = to;
-        LookAt(to + Velocity, Vector3.Up);
+        // Only orient when the velocity isn't (near) parallel to Up, or LookAt errors.
+        if (Velocity.LengthSquared() > 0.0001f && Mathf.Abs(Velocity.Normalized().Y) < 0.985f)
+            LookAt(to + Velocity, Vector3.Up);
     }
 
     public static Projectile Spawn(Node parent, Vector3 origin, Vector3 velocity, float damage, Node3D shooter, Texture2D icon = null)

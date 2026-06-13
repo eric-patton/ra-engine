@@ -80,6 +80,9 @@ public partial class GameSession : Node3D
 
         Player.HealthChanged += Hud.SetHealth;
         Player.AirChanged += Hud.SetAir;
+        // seed the bars now, since Player._Ready already emitted its initial values
+        Hud.SetHealth(Player.Health, Player.MaxHealth);
+        Hud.SetAir(Player.Air, Player.MaxAir);
 
         SetMode(creative ? Mode.Build : Mode.Adventure);
 
