@@ -24,6 +24,7 @@ public partial class GameHud : CanvasLayer
         BuildBars();
         BuildBanner();
         BuildWeaponLabel();
+        BuildInteractPrompt();
     }
 
     private void BuildWeaponLabel()
@@ -50,6 +51,34 @@ public partial class GameHud : CanvasLayer
     public void SetWeapon(string name) => _weaponLabel.Text = string.IsNullOrEmpty(name) ? "" : $"⚔ {name}";
     public void SetWeaponVisible(bool on) => _weaponLabel.Visible = on;
     public void SetHotbarVisible(bool on) => Hotbar.Visible = on;
+
+    private Label _interactPrompt;
+
+    private void BuildInteractPrompt()
+    {
+        _interactPrompt = new Label { Visible = false, HorizontalAlignment = HorizontalAlignment.Center };
+        _interactPrompt.AddThemeFontSizeOverride("font_size", 22);
+        _interactPrompt.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _interactPrompt.AddThemeConstantOverride("outline_size", 5);
+        _interactPrompt.MouseFilter = Control.MouseFilterEnum.Ignore;
+        AddChild(_interactPrompt);
+        GetViewport().SizeChanged += RelayoutInteract;
+        RelayoutInteract();
+    }
+
+    private void RelayoutInteract()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        _interactPrompt.Size = new Vector2(vp.X, 28);
+        _interactPrompt.Position = new Vector2(0, vp.Y * 0.62f);
+    }
+
+    public void SetInteractPrompt(string text)
+    {
+        if (_interactPrompt == null) return;
+        _interactPrompt.Text = text;
+        _interactPrompt.Visible = !string.IsNullOrEmpty(text);
+    }
 
     public void Configure(BlockTextures tex, IEnumerable<ushort> palette)
     {

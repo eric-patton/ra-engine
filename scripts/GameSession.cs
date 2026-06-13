@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using Godot;
 using RAEngine.Combat;
 using RAEngine.Core;
+using RAEngine.Dialogue;
+using RAEngine.NpcSys;
 using RAEngine.PlayerSys;
 using RAEngine.UI;
 
@@ -19,7 +21,11 @@ public partial class GameSession : Node3D
     public GameHud Hud { get; private set; }
     public BlockInteractor Interactor { get; private set; }
     public WeaponController Weapons { get; private set; }
+    public DialogueBox Dialogue { get; private set; }
+    public Narrator Narrator { get; private set; }
     public Mode CurrentMode { get; private set; }
+    public bool InDialogue { get; private set; }
+    public float InteractRange = 3.8f;
 
     public static readonly string[] DefaultPalette =
     {
@@ -55,6 +61,12 @@ public partial class GameSession : Node3D
         Weapons.Equip(Weapon.Sling());
         Weapons.WeaponChanged += Hud.SetWeapon;
 
+        Narrator = new Narrator { Name = "Narrator" };
+        AddChild(Narrator);
+        Dialogue = new DialogueBox { Name = "DialogueBox" };
+        AddChild(Dialogue);
+        Dialogue.Finished += OnDialogueFinished;
+
         Player.HealthChanged += Hud.SetHealth;
         Player.AirChanged += Hud.SetAir;
 
@@ -62,6 +74,52 @@ public partial class GameSession : Node3D
 
         if (captureMouse) Player.MakeCurrent();
         else Player.Camera.Current = true;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (Player == null || InDialogue) return;
+
+        // find the nearest talkable NPC within reach
+        Npc best = null;
+        float bestDist = InteractRange;
+        foreach (Node n in GetTree().GetNodesInGroup("npc"))
+        {
+            if (n is not Npc npc || npc.Dialogue == null) continue;
+            float d = npc.GlobalPosition.DistanceTo(Player.GlobalPosition);
+            if (d < bestDist) { bestDist = d; best = npc; }
+        }
+
+        if (best != null)
+        {
+            Hud.SetInteractPrompt($"[E]  Talk to {best.NpcName}");
+            if (Input.IsActionJustPressed(GameInput.Actions.Interact))
+                StartDialogue(best.Dialogue);
+        }
+        else
+        {
+            Hud.SetInteractPrompt("");
+        }
+    }
+
+    public void StartDialogue(DialogueData data)
+    {
+        if (data == null || InDialogue) return;
+        InDialogue = true;
+        Hud.SetInteractPrompt("");
+        Player.InputEnabled = false;
+        Weapons.SetEnabled(false);
+        Interactor.CanEdit = false;
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        Dialogue.StartDialogue(data);
+    }
+
+    private void OnDialogueFinished()
+    {
+        InDialogue = false;
+        Player.InputEnabled = true;
+        SetMode(CurrentMode); // restores weapon/build interaction for the mode
+        Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
     /// <summary>Switch between block-building and weapon-combat interaction.</summary>

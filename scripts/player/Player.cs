@@ -50,6 +50,7 @@ public partial class Player : CharacterBody3D, IDamageable
     public override void _Ready()
     {
         GameInput.Setup();
+        AddToGroup("player");
 
         _capsule = new CapsuleShape3D { Radius = Radius, Height = StandHeight };
         _shape = new CollisionShape3D { Shape = _capsule, Position = new Vector3(0, StandHeight * 0.5f, 0) };

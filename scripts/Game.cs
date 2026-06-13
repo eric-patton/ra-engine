@@ -47,6 +47,9 @@ public partial class Game : Node3D
             case "--test-combat":
                 RunCombatTest();
                 break;
+            case "--test-npc":
+                RunNpcTest();
+                break;
             default:
                 StartSandbox();
                 break;
@@ -65,6 +68,55 @@ public partial class Game : Node3D
         session.World.MarkAllDirty();
         session.World.RebuildAllNow();
         session.Hud.ShowBanner("Sandbox — build freely! (G toggles fly)", 4f);
+    }
+
+    private async void RunNpcTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 24), creative: false);
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Player.InputEnabled = false;
+
+        var npc = new NpcSys.Npc
+        {
+            NpcName = "Jesse",
+            Robe = new Color(0.5f, 0.35f, 0.55f),
+            Dialogue = Dialogue.DialogueData.Linear("Jesse",
+                "Welcome, young shepherd.",
+                "The Philistines have gathered for battle in the Valley of Elah.",
+                "Will you carry bread to your brothers at the camp?"),
+        };
+        session.World.AddChild(npc);
+        npc.GlobalPosition = new Vector3(24, 1, 19);
+
+        // a narration trigger right where the player stands
+        var trig = World.NarrationTrigger.Create(new Vector3(24, 1.5f, 24), new Vector3(3, 3, 3),
+            session.Narrator, "And David rose early in the morning...", "...and went, as Jesse had commanded him.");
+        session.World.AddChild(trig);
+
+        session.Player.Head.Rotation = new Vector3(-0.1f, 0, 0);
+        await ToSignal(GetTree().CreateTimer(0.8), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_npc.png", 0.2);
+
+        // start + drive the conversation
+        session.StartDialogue(npc.Dialogue);
+        await ToSignal(GetTree().CreateTimer(0.4), SceneTreeTimer.SignalName.Timeout);
+        bool boxShown = session.Dialogue.Active;
+        await Capture("res://_dialogue.png", 0.2);
+
+        int guard = 0;
+        while (session.InDialogue && guard++ < 12)
+        {
+            session.Dialogue.Advance();
+            await ToSignal(GetTree().CreateTimer(0.15), SceneTreeTimer.SignalName.Timeout);
+        }
+        GD.Print($"[RA] npc-test: dialogueShown={boxShown} finished={!session.InDialogue} steps={guard} " +
+                 $"inputRestored={session.Player.InputEnabled}");
+
+        GetTree().Quit(0);
     }
 
     private async void RunCombatTest()
