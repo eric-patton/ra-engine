@@ -1,0 +1,64 @@
+using Godot;
+using RAEngine.Core;
+
+namespace RAEngine.Combat;
+
+/// <summary>A thrown/launched projectile (sling stone, arrow). Moves under
+/// gravity and raycasts each step against world and mobs; damages the first
+/// <see cref="IDamageable"/> it hits, otherwise stops on terrain.</summary>
+public partial class Projectile : Node3D
+{
+    public Vector3 Velocity;
+    public float Damage = 10f;
+    public float Gravity = 16f;
+    public float Life = 6f;
+    public Node3D Shooter;
+
+    public override void _PhysicsProcess(double delta)
+    {
+        float dt = (float)delta;
+        Life -= dt;
+        if (Life <= 0) { QueueFree(); return; }
+
+        Velocity += Vector3.Down * Gravity * dt;
+        Vector3 from = GlobalPosition;
+        Vector3 to = from + Velocity * dt;
+
+        var space = GetWorld3D().DirectSpaceState;
+        var query = PhysicsRayQueryParameters3D.Create(from, to);
+        if (Shooter is CollisionObject3D co) query.Exclude = new Godot.Collections.Array<Rid> { co.GetRid() };
+        var hit = space.IntersectRay(query);
+
+        if (hit.Count > 0)
+        {
+            GlobalPosition = (Vector3)hit["position"];
+            var collider = hit["collider"].As<GodotObject>();
+            if (collider is IDamageable dmg && (Node)collider != Shooter)
+                dmg.TakeDamage(Damage, this);
+            QueueFree();
+            return;
+        }
+
+        GlobalPosition = to;
+        LookAt(to + Velocity, Vector3.Up);
+    }
+
+    public static Projectile Spawn(Node parent, Vector3 origin, Vector3 velocity, float damage, Node3D shooter, Texture2D icon = null)
+    {
+        var p = new Projectile { Velocity = velocity, Damage = damage, Shooter = shooter };
+        var mesh = new MeshInstance3D
+        {
+            Mesh = new SphereMesh { Radius = 0.12f, Height = 0.24f },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.6f, 0.6f, 0.62f),
+                AlbedoTexture = icon,
+                Roughness = 0.9f,
+            },
+        };
+        p.AddChild(mesh);
+        parent.AddChild(p);
+        p.GlobalPosition = origin;
+        return p;
+    }
+}

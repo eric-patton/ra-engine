@@ -94,12 +94,8 @@ public sealed class BlockTextures
         Texture2D tex = null;
         if (!string.IsNullOrEmpty(name))
         {
-            string path = $"{Root}/{name}/albedo.png";
-            if (FileAccess.FileExists(path))
-            {
-                var img = Image.LoadFromFile(path);
-                if (img != null) tex = ImageTexture.CreateFromImage(img);
-            }
+            var img = LoadPng($"{Root}/{name}/albedo.png");
+            if (img != null) tex = ImageTexture.CreateFromImage(img);
         }
         _icons[b.Id] = tex;
         return tex;
@@ -120,11 +116,20 @@ public sealed class BlockTextures
         return img;
     }
 
+    /// <summary>Decode a PNG straight from bytes. Avoids the engine's
+    /// "loaded as image file" export warning and ignores import settings.</summary>
+    private static Image LoadPng(string path)
+    {
+        if (!FileAccess.FileExists(path)) return null;
+        byte[] bytes = FileAccess.GetFileAsBytes(path);
+        if (bytes == null || bytes.Length == 0) return null;
+        var img = new Image();
+        return img.LoadPngFromBuffer(bytes) == Error.Ok ? img : null;
+    }
+
     private static Image LoadOr(string path, Image.Format fmt, Color fallback)
     {
-        Image img = null;
-        if (FileAccess.FileExists(path))
-            img = Image.LoadFromFile(path);
+        Image img = LoadPng(path);
         if (img == null)
         {
             img = Image.CreateEmpty(TexSize, TexSize, false, fmt);
@@ -155,7 +160,7 @@ public sealed class BlockTextures
 
     private static Image LoadGray(string path, float fallback)
     {
-        Image img = FileAccess.FileExists(path) ? Image.LoadFromFile(path) : null;
+        Image img = LoadPng(path);
         if (img == null)
         {
             img = Image.CreateEmpty(TexSize, TexSize, false, Image.Format.L8);

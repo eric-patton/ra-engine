@@ -15,6 +15,7 @@ public partial class GameHud : CanvasLayer
     private Label _banner;
     private Timer _bannerTimer;
     private Control _crosshair;
+    private Label _weaponLabel;
 
     public override void _Ready()
     {
@@ -22,7 +23,33 @@ public partial class GameHud : CanvasLayer
         BuildHotbar();
         BuildBars();
         BuildBanner();
+        BuildWeaponLabel();
     }
+
+    private void BuildWeaponLabel()
+    {
+        _weaponLabel = new Label { Visible = false, Text = "" };
+        _weaponLabel.AddThemeFontSizeOverride("font_size", 20);
+        _weaponLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _weaponLabel.AddThemeConstantOverride("outline_size", 4);
+        _weaponLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _weaponLabel.SetAnchorsPreset(Control.LayoutPreset.BottomRight);
+        AddChild(_weaponLabel);
+        GetViewport().SizeChanged += RelayoutWeapon;
+        RelayoutWeapon();
+    }
+
+    private void RelayoutWeapon()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        _weaponLabel.Size = new Vector2(220, 28);
+        _weaponLabel.Position = new Vector2(vp.X - 240, vp.Y - 44);
+        _weaponLabel.HorizontalAlignment = HorizontalAlignment.Right;
+    }
+
+    public void SetWeapon(string name) => _weaponLabel.Text = string.IsNullOrEmpty(name) ? "" : $"⚔ {name}";
+    public void SetWeaponVisible(bool on) => _weaponLabel.Visible = on;
+    public void SetHotbarVisible(bool on) => Hotbar.Visible = on;
 
     public void Configure(BlockTextures tex, IEnumerable<ushort> palette)
     {

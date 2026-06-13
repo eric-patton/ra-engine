@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Godot;
+using RAEngine.Combat;
 using RAEngine.Core;
 using RAEngine.PlayerSys;
 using RAEngine.UI;
@@ -11,10 +12,14 @@ namespace RAEngine;
 /// lessons (which generate a world and configure objectives on top).</summary>
 public partial class GameSession : Node3D
 {
+    public enum Mode { Build, Adventure }
+
     public VoxelWorld World { get; private set; }
     public Player Player { get; private set; }
     public GameHud Hud { get; private set; }
     public BlockInteractor Interactor { get; private set; }
+    public WeaponController Weapons { get; private set; }
+    public Mode CurrentMode { get; private set; }
 
     public static readonly string[] DefaultPalette =
     {
@@ -44,10 +49,38 @@ public partial class GameSession : Node3D
         Interactor = new BlockInteractor { Name = "Interactor", World = World, Player = Player, Hotbar = Hud.Hotbar };
         AddChild(Interactor);
 
+        Weapons = new WeaponController { Name = "Weapons", Player = Player, ProjectileParent = this };
+        Player.AddChild(Weapons);
+        Weapons.AttachViewmodel();
+        Weapons.Equip(Weapon.Sling());
+        Weapons.WeaponChanged += Hud.SetWeapon;
+
         Player.HealthChanged += Hud.SetHealth;
         Player.AirChanged += Hud.SetAir;
 
+        SetMode(creative ? Mode.Build : Mode.Adventure);
+
         if (captureMouse) Player.MakeCurrent();
         else Player.Camera.Current = true;
+    }
+
+    /// <summary>Switch between block-building and weapon-combat interaction.</summary>
+    public void SetMode(Mode mode)
+    {
+        CurrentMode = mode;
+        bool build = mode == Mode.Build;
+        Interactor.CanEdit = build;
+        Weapons.SetEnabled(!build);
+        Hud.SetHotbarVisible(build);
+        Hud.SetWeaponVisible(!build);
+        Hud.SetWeapon(Weapons.Current?.Name ?? "");
+    }
+
+    public Enemy SpawnEnemy(EnemyType type, Vector3 position)
+    {
+        var e = new Enemy { Type = type, Target = Player, Name = $"Enemy_{type.Name}" };
+        World.AddChild(e);
+        e.GlobalPosition = position;
+        return e;
     }
 }

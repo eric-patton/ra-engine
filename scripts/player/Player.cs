@@ -7,7 +7,7 @@ namespace RAEngine.PlayerSys;
 /// jumping with fall damage, and swimming with an air/drowning meter. Tuned for
 /// a mixed-age audience (forgiving acceleration, no twitchy speeds). Creative
 /// mode enables noclip-free flight and disables damage.</summary>
-public partial class Player : CharacterBody3D
+public partial class Player : CharacterBody3D, IDamageable
 {
     [Signal] public delegate void HealthChangedEventHandler(float current, float max);
     [Signal] public delegate void AirChangedEventHandler(float current, float max);
@@ -256,6 +256,9 @@ public partial class Player : CharacterBody3D
         new(Mathf.FloorToInt(p.X), Mathf.FloorToInt(p.Y), Mathf.FloorToInt(p.Z));
 
     // ---- health -----------------------------------------------------------
+
+    public bool IsAlive => !IsDead;
+    public void TakeDamage(float amount, Node3D source) => Damage(amount, "hit");
 
     public void Damage(float amount, string cause = "")
     {

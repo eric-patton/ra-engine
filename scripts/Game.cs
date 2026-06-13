@@ -44,6 +44,9 @@ public partial class Game : Node3D
             case "--test-hud":
                 RunHudTest();
                 break;
+            case "--test-combat":
+                RunCombatTest();
+                break;
             default:
                 StartSandbox();
                 break;
@@ -62,6 +65,48 @@ public partial class Game : Node3D
         session.World.MarkAllDirty();
         session.World.RebuildAllNow();
         session.Hud.ShowBanner("Sandbox — build freely! (G toggles fly)", 4f);
+    }
+
+    private async void RunCombatTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 24), creative: false);
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Player.InputEnabled = false; // physics only; we trigger combat by script
+
+        var soldier = session.SpawnEnemy(Combat.EnemyType.Soldier(), new Vector3(24, 1, 16));
+        var giant = session.SpawnEnemy(Combat.EnemyType.Giant(), new Vector3(29, 1, 14));
+        var wolf = session.SpawnEnemy(Combat.EnemyType.Wolf(), new Vector3(34, 1, 24)); // clear +X lane
+        wolf.Target = null; // stand still so the projectile test isn't a moving-lead problem
+        session.Hud.ShowBanner("Combat test", 5f);
+
+        await ToSignal(GetTree().CreateTimer(0.7), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_combat.png", 0.2);
+
+        // fire a projectile straight at the wolf's centre (tests projectile -> damage)
+        float wolfBefore = wolf.Health;
+        Vector3 camPos = session.Player.Camera.GlobalPosition;
+        Vector3 wolfCenter = wolf.GlobalPosition + Vector3.Up * 1.0f;
+        Vector3 dir = (wolfCenter - camPos).Normalized();
+        Combat.Projectile.Spawn(session, camPos, dir * 45f, 22f, session.Player);
+        await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
+        GD.Print($"[RA] combat sling: wolf {wolfBefore:F0} -> {(GodotObject.IsInstanceValid(wolf) ? wolf.Health : 0):F0}");
+
+        // let the soldier close in and hit the player
+        await ToSignal(GetTree().CreateTimer(2.6), SceneTreeTimer.SignalName.Timeout);
+        float sdist = GodotObject.IsInstanceValid(soldier)
+            ? (soldier.GlobalPosition - session.Player.GlobalPosition).Length() : -1;
+        GD.Print($"[RA] combat chase: soldierDist={sdist:F1} playerHp={session.Player.Health:F0}");
+
+        // defeat the giant outright -> should poof and free
+        giant.TakeDamage(9999, session.Player);
+        await ToSignal(GetTree().CreateTimer(0.7), SceneTreeTimer.SignalName.Timeout);
+        GD.Print($"[RA] combat defeat: giantValid={GodotObject.IsInstanceValid(giant)}");
+
+        GetTree().Quit(0);
     }
 
     private async void RunHudTest()
