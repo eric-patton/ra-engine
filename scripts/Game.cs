@@ -38,7 +38,50 @@ public partial class Game : Node3D
             {
                 RunWorldTest();
             }
+            else if (arg == "--test-player")
+            {
+                RunPlayerTest();
+            }
         }
+    }
+
+    private async void RunPlayerTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        Core.WorldGen.FlatGround(world, 0, 32, 0, 32, 0);
+        // stone tub with ~7-deep water for the swim test
+        for (int x = 4; x <= 10; x++)
+        for (int z = 4; z <= 10; z++)
+        for (int y = -8; y <= 0; y++)
+            world.SetBlock(x, y, z, Core.BlockRegistry.IdOf("stone"), false);
+        for (int x = 5; x <= 9; x++)
+        for (int z = 5; z <= 9; z++)
+        for (int y = -7; y <= 0; y++)
+            world.SetBlock(x, y, z, Core.BlockRegistry.IdOf("water"), false);
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+
+        var player = new PlayerSys.Player { Name = "Player", World = world, InputEnabled = false };
+        AddChild(player);
+        player.GlobalPosition = new Vector3(16, 8, 16);
+        player.Camera.Current = true;
+
+        // Phase A: fall onto grass from ~7 blocks -> expect landing + fall damage
+        await ToSignal(GetTree().CreateTimer(1.6), SceneTreeTimer.SignalName.Timeout);
+        GD.Print($"[RA] player ground: y={player.GlobalPosition.Y:F2} onFloor={player.IsOnFloor()} " +
+                 $"hp={player.Health:F1} inWater={player.InWater}");
+        await Capture("res://_player_ground.png", 0.3);
+
+        // Phase B: drop into the deep water -> expect float near surface, no fall damage
+        player.Respawn(new Vector3(7, 6, 7));
+        await ToSignal(GetTree().CreateTimer(4.0), SceneTreeTimer.SignalName.Timeout);
+        GD.Print($"[RA] player water: y={player.GlobalPosition.Y:F2} inWater={player.InWater} " +
+                 $"headUnder={player.HeadUnderwater} air={player.Air:F1} hp={player.Health:F1}");
+        await Capture("res://_player_water.png", 0.3);
+
+        GetTree().Quit(0);
     }
 
     private void RunWorldTest()
