@@ -62,6 +62,9 @@ public partial class Game : Node3D
             case "--test-greedy":
                 RunGreedyTest();
                 break;
+            case "--test-biomes":
+                RunBiomeTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -613,6 +616,43 @@ public partial class Game : Node3D
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-4 biome test: a wide sample of the seeded world should contain
+    /// several distinct biomes, and generating a band of chunks should place trees
+    /// (logs + leaves) in the wooded ones.</summary>
+    private void RunBiomeTest()
+    {
+        var gen = new Core.TerrainGenerator(1337);
+        var counts = new System.Collections.Generic.Dictionary<Core.Biome, int>();
+        const int step = 8, range = 2400;
+        for (int x = -range; x <= range; x += step)
+        for (int z = -range; z <= range; z += step)
+        {
+            var b = gen.BiomeAt(x, z, gen.SurfaceHeight(x, z));
+            counts.TryGetValue(b, out int c);
+            counts[b] = c + 1;
+        }
+
+        ushort log = Core.BlockRegistry.IdOf("oak_log");
+        ushort leaves = Core.BlockRegistry.IdOf("leaves");
+        int logCount = 0, leafCount = 0;
+        var buf = new ushort[Core.Chunk.Volume];
+        for (int cx = 0; cx < 40; cx++)
+        for (int cy = 0; cy <= 3; cy++)
+        {
+            gen.Generate(new Vector3I(cx, cy, 0), buf);
+            foreach (var id in buf)
+            {
+                if (id == log) logCount++;
+                else if (id == leaves) leafCount++;
+            }
+        }
+
+        var summary = new System.Text.StringBuilder();
+        foreach (var kv in counts) summary.Append($"{kv.Key}:{kv.Value} ");
+        GD.Print($"[RA] biome-test: distinct={counts.Count} logs={logCount} leaves={leafCount} | {summary}");
+        QuitSoon();
     }
 
     /// <summary>Phase-3 greedy-meshing test: a flat 16×16 grass slab (one chunk
