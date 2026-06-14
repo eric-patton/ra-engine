@@ -30,6 +30,27 @@ public static class GameInput
         Wheel(Actions.HotbarNext, MouseButton.WheelDown);
         Wheel(Actions.HotbarPrev, MouseButton.WheelUp);
 
+        // Keyboard camera look (so the game is playable without a mouse). Arrow
+        // keys work on every keyboard; the numpad mirror suits a full keyboard.
+        Key(Actions.LookUp, Godot.Key.Up);
+        Key(Actions.LookUp, Godot.Key.Kp8);
+        Key(Actions.LookDown, Godot.Key.Down);
+        Key(Actions.LookDown, Godot.Key.Kp2);
+        Key(Actions.LookLeft, Godot.Key.Left);
+        Key(Actions.LookLeft, Godot.Key.Kp4);
+        Key(Actions.LookRight, Godot.Key.Right);
+        Key(Actions.LookRight, Godot.Key.Kp6);
+
+        // Keyboard place/break (the "primary/secondary" action without a mouse).
+        // Numpad +/- are mnemonic (add/remove a block); ,/. work on laptops.
+        Key(Actions.KbBreak, Godot.Key.KpSubtract);
+        Key(Actions.KbBreak, Godot.Key.Comma);
+        Key(Actions.KbPlace, Godot.Key.KpAdd);
+        Key(Actions.KbPlace, Godot.Key.Period);
+
+        // Grab/release the mouse on demand (works in every capture mode).
+        Key(Actions.ToggleCapture, Godot.Key.M);
+
         for (int i = 0; i < 9; i++)
             Key($"hotbar_{i + 1}", (Key)((int)Godot.Key.Key1 + i));
 
@@ -85,6 +106,13 @@ public static class GameInput
         public const string Inventory = "inventory";
         public const string HotbarNext = "hotbar_next";
         public const string HotbarPrev = "hotbar_prev";
+        public const string LookUp = "look_up";
+        public const string LookDown = "look_down";
+        public const string LookLeft = "look_left";
+        public const string LookRight = "look_right";
+        public const string KbBreak = "kb_break";
+        public const string KbPlace = "kb_place";
+        public const string ToggleCapture = "toggle_capture";
         public const string EditorSave = "editor_save";
         public const string EditorLoad = "editor_load";
         public const string MarkA = "editor_mark_a";

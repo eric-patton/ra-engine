@@ -28,6 +28,7 @@ public partial class GameHud : CanvasLayer
         BuildBanner();
         BuildWeaponLabel();
         BuildInteractPrompt();
+        BuildMouseHint();
         BuildObjectives();
     }
 
@@ -92,6 +93,35 @@ public partial class GameHud : CanvasLayer
         if (_interactPrompt == null) return;
         _interactPrompt.Text = text;
         _interactPrompt.Visible = !string.IsNullOrEmpty(text);
+    }
+
+    private Label _mouseHint;
+
+    private void BuildMouseHint()
+    {
+        _mouseHint = new Label { Visible = false, HorizontalAlignment = HorizontalAlignment.Center };
+        _mouseHint.AddThemeFontSizeOverride("font_size", 18);
+        _mouseHint.AddThemeColorOverride("font_color", new Color(1f, 1f, 1f, 0.85f));
+        _mouseHint.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _mouseHint.AddThemeConstantOverride("outline_size", 5);
+        _mouseHint.MouseFilter = Control.MouseFilterEnum.Ignore;
+        AddChild(_mouseHint);
+        GetViewport().SizeChanged += RelayoutMouseHint;
+        RelayoutMouseHint();
+    }
+
+    private void RelayoutMouseHint()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        _mouseHint.Size = new Vector2(vp.X, 24);
+        _mouseHint.Position = new Vector2(0, vp.Y - 40);
+    }
+
+    public void SetMouseHint(string text)
+    {
+        if (_mouseHint == null) return;
+        if (_mouseHint.Text != text) _mouseHint.Text = text;
+        _mouseHint.Visible = !string.IsNullOrEmpty(text);
     }
 
     // ---- objectives + lesson completion ----------------------------------
@@ -276,6 +306,7 @@ public partial class GameHud : CanvasLayer
         vp.SizeChanged -= RelayoutInteract;
         vp.SizeChanged -= RelayoutObjectives;
         vp.SizeChanged -= RelayoutBanner;
+        vp.SizeChanged -= RelayoutMouseHint;
     }
 
     private void RelayoutBanner()

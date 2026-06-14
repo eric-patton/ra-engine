@@ -13,6 +13,7 @@ public partial class PauseMenu : CanvasLayer
     private Control _root;
     private SettingsPanel _settings;
     private bool _paused;
+    private Input.MouseModeEnum _preMouse = Input.MouseModeEnum.Visible;
 
     public bool IsPaused => _paused;
 
@@ -70,6 +71,9 @@ public partial class PauseMenu : CanvasLayer
         _paused = p;
         GetTree().Paused = p;
         _root.Visible = p;
-        Input.MouseMode = p ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured;
+        // Free the cursor to use the menu, then restore exactly what it was — so
+        // a player who was playing keyboard-only (free cursor) stays that way.
+        if (p) { _preMouse = Input.MouseMode; Input.MouseMode = Input.MouseModeEnum.Visible; }
+        else Input.MouseMode = _preMouse;
     }
 }

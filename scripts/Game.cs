@@ -48,6 +48,9 @@ public partial class Game : Node3D
             case "--test-swim-exit":
                 RunSwimExitTest();
                 break;
+            case "--test-controls":
+                RunControlsTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -115,7 +118,7 @@ public partial class Game : Node3D
         Core.WorldGen.FlatGround(_session.World, -16, 64, -16, 64, 0);
         _session.World.MarkAllDirty();
         _session.World.RebuildAllNow();
-        _session.Hud.ShowBanner("Sandbox — build freely!  (G fly · B mode · F5 save · F9 load)", 5f);
+        _session.Hud.ShowBanner("Sandbox — build freely!  (move WASD · look arrows/numpad or mouse · +/- place/break · G fly · B mode)", 6f);
     }
 
     private GameSession StartLesson(Lessons.ILesson lesson)
@@ -485,6 +488,65 @@ public partial class Game : Node3D
 
         GD.Print($"[RA] swim-exit: floated y={floatY:F2} inWater={floatIn} -> " +
                  $"exitPos=({exitPos.X:F1},{exitPos.Y:F2},{exitPos.Z:F1}) EXITED_ONTO_BANK={exited}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-1 controls test: verifies the game is playable without a
+    /// mouse — the cursor stays free by default, arrow/numpad keys turn the camera,
+    /// and the +/- keys place and break blocks at the crosshair while uncaptured.</summary>
+    private async void RunControlsTest()
+    {
+        Core.Settings.CaptureMode = Core.Settings.MouseCapture.ClickToCapture; // deterministic
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 22), creative: true); // Build mode, free cursor
+
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        for (int y = 1; y <= 3; y++)
+            session.World.SetBlock(24, y, 18, Core.BlockRegistry.IdOf("stone"), false);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+
+        bool initFree = Input.MouseMode != Input.MouseModeEnum.Captured;
+
+        // settle a frame so the interactor casts at the pillar straight ahead (-Z)
+        await ToSignal(GetTree().CreateTimer(0.3), SceneTreeTimer.SignalName.Timeout);
+        var tgt = session.Interactor.CurrentTarget;
+        Vector3I placeCell = tgt.Prev;
+
+        // keyboard PLACE (mouse not captured) -> a block appears at the near face
+        Input.ActionPress(Core.GameInput.Actions.KbPlace);
+        await ToSignal(GetTree().CreateTimer(0.12), SceneTreeTimer.SignalName.Timeout);
+        Input.ActionRelease(Core.GameInput.Actions.KbPlace);
+        bool placed = tgt.Ok && session.World.GetBlockId(placeCell) != 0;
+
+        // keyboard BREAK -> removes whatever is now under the crosshair
+        await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
+        Vector3I breakCell = session.Interactor.CurrentTarget.Block;
+        Input.ActionPress(Core.GameInput.Actions.KbBreak);
+        await ToSignal(GetTree().CreateTimer(0.12), SceneTreeTimer.SignalName.Timeout);
+        Input.ActionRelease(Core.GameInput.Actions.KbBreak);
+        bool broke = session.World.GetBlockId(breakCell) == 0;
+
+        // keyboard LOOK: arrows/numpad turn the body (yaw) and head (pitch)
+        float yaw0 = session.Player.Rotation.Y, pitch0 = session.Player.Head.Rotation.X;
+        Input.ActionPress(Core.GameInput.Actions.LookLeft);
+        await ToSignal(GetTree().CreateTimer(0.3), SceneTreeTimer.SignalName.Timeout);
+        Input.ActionRelease(Core.GameInput.Actions.LookLeft);
+        Input.ActionPress(Core.GameInput.Actions.LookUp);
+        await ToSignal(GetTree().CreateTimer(0.3), SceneTreeTimer.SignalName.Timeout);
+        Input.ActionRelease(Core.GameInput.Actions.LookUp);
+        float yawDelta = Mathf.Abs(session.Player.Rotation.Y - yaw0);
+        float pitchDelta = session.Player.Head.Rotation.X - pitch0;
+
+        // M toggles the cursor grab on demand
+        Input.ActionPress(Core.GameInput.Actions.ToggleCapture);
+        await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
+        Input.ActionRelease(Core.GameInput.Actions.ToggleCapture);
+        bool toggledCaptured = Input.MouseMode == Input.MouseModeEnum.Captured;
+
+        GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
+                 $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
         GetTree().Quit(0);
     }
 

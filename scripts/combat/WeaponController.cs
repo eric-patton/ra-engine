@@ -56,11 +56,16 @@ public partial class WeaponController : Node3D
     {
         if (_cooldown > 0) _cooldown -= (float)delta;
         if (!Enabled || Player == null || Current == null) return;
-        // Not while the cursor is free, nor during the brief lockout after a
-        // re-capture (so the click that re-focuses the window doesn't fire).
-        if (Input.MouseMode != Input.MouseModeEnum.Captured || Player.ActionsSuppressed) return;
+        // Not during the brief lockout after a re-capture (so the click that
+        // re-focuses the window doesn't fire), nor when input is disabled.
+        if (Player.ActionsSuppressed || !Player.InputEnabled) return;
 
-        if (Input.IsActionPressed(GameInput.Actions.Primary) && _cooldown <= 0f)
+        // Attack on the mouse button WHILE captured, or on the keyboard "break"
+        // key (-, ·) at any time — the same primary-action mapping as building.
+        bool mouse = Input.MouseMode == Input.MouseModeEnum.Captured;
+        bool attack = (mouse && Input.IsActionPressed(GameInput.Actions.Primary))
+                      || Input.IsActionPressed(GameInput.Actions.KbBreak);
+        if (attack && _cooldown <= 0f)
             PrimaryAttack();
     }
 

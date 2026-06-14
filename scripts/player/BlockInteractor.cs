@@ -41,25 +41,31 @@ public partial class BlockInteractor : Node3D
         if (World == null || Player == null) return;
         UpdateTarget();
 
-        // Don't break/place when editing is off, the cursor is free, or we just
+        // Don't break/place when editing is off, the player can't act, or we just
         // re-captured the mouse (so the re-focus click doesn't also dig/build).
-        if (!CanEdit || Input.MouseMode != Input.MouseModeEnum.Captured || Player.ActionsSuppressed)
+        if (!CanEdit || !Player.InputEnabled || Player.ActionsSuppressed)
         {
             _breakTimer = _placeTimer = 0f;
             return;
         }
 
+        // Break/place come from the mouse buttons WHILE the cursor is captured, or
+        // from the keyboard (+/- · ,/.) at any time — so keyboard-only play works.
         float dt = (float)delta;
-        StepAction(GameInput.Actions.Primary, ref _breakTimer, TryBreak, dt);
-        StepAction(GameInput.Actions.Secondary, ref _placeTimer, TryPlace, dt);
+        bool mouse = Input.MouseMode == Input.MouseModeEnum.Captured;
+        StepAction(mouse, GameInput.Actions.Primary, GameInput.Actions.KbBreak, ref _breakTimer, TryBreak, dt);
+        StepAction(mouse, GameInput.Actions.Secondary, GameInput.Actions.KbPlace, ref _placeTimer, TryPlace, dt);
     }
 
     // Fire once on press, then auto-repeat while held. Break and place use
-    // independent timers, so holding one never suppresses the other.
-    private void StepAction(string action, ref float timer, System.Func<bool> act, float dt)
+    // independent timers, so holding one never suppresses the other. The mouse
+    // button only counts when the cursor is captured; the keyboard key always does.
+    private void StepAction(bool mouse, string mouseAct, string keyAct, ref float timer, System.Func<bool> act, float dt)
     {
-        if (Input.IsActionJustPressed(action)) { act(); timer = RepeatDelay; return; }
-        if (Input.IsActionPressed(action))
+        bool just = (mouse && Input.IsActionJustPressed(mouseAct)) || Input.IsActionJustPressed(keyAct);
+        bool held = (mouse && Input.IsActionPressed(mouseAct)) || Input.IsActionPressed(keyAct);
+        if (just) { act(); timer = RepeatDelay; return; }
+        if (held)
         {
             timer -= dt;
             if (timer <= 0f) { act(); timer = RepeatDelay; }
@@ -69,7 +75,9 @@ public partial class BlockInteractor : Node3D
 
     private void UpdateTarget()
     {
-        if (Input.MouseMode != Input.MouseModeEnum.Captured)
+        // Show the targeting outline whenever the player can act — including in
+        // click-to-capture / keyboard modes where the cursor isn't captured.
+        if (!Player.InputEnabled)
         {
             _highlight.Visible = false;
             _target = default;

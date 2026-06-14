@@ -99,11 +99,29 @@ public partial class Player : CharacterBody3D, IDamageable
             float pitch = Mathf.Clamp(_head.Rotation.X - mm.Relative.Y * sens, -1.5f, 1.5f);
             _head.Rotation = new Vector3(pitch, 0, 0);
         }
-        else if (e.IsActionPressed(GameInput.Actions.ToggleMode)
-                 && Input.MouseMode == Input.MouseModeEnum.Captured)
+        else if (e.IsActionPressed(GameInput.Actions.ToggleMode))
         {
+            // No mouse-capture requirement: keyboard-only players toggle fly too.
+            // (_UnhandledInput already returned above when input is disabled.)
             SetCreative(!Creative);
         }
+    }
+
+    /// <summary>Arrow-key / numpad camera look, so the game is fully playable
+    /// without a mouse. Accumulates yaw on the body and pitch on the head at a
+    /// settable degrees-per-second rate, clamped exactly like the mouse look.</summary>
+    private void KeyboardLook(float dt)
+    {
+        if (!InputEnabled) return;
+        float rate = Mathf.DegToRad(Core.Settings.KeyboardLookSpeed) * dt;
+        float yaw = Input.GetActionStrength(GameInput.Actions.LookLeft)
+                  - Input.GetActionStrength(GameInput.Actions.LookRight);
+        float pitch = Input.GetActionStrength(GameInput.Actions.LookUp)
+                    - Input.GetActionStrength(GameInput.Actions.LookDown);
+        if (!Mathf.IsZeroApprox(yaw)) RotateY(yaw * rate);
+        if (!Mathf.IsZeroApprox(pitch))
+            _head.Rotation = new Vector3(
+                Mathf.Clamp(_head.Rotation.X + pitch * rate, -1.5f, 1.5f), 0, 0);
     }
 
     public override void _PhysicsProcess(double delta)
@@ -114,6 +132,8 @@ public partial class Player : CharacterBody3D, IDamageable
         UpdateCrouch();
 
         if (IsDead) { Velocity = Velocity.Lerp(Vector3.Zero, dt * 4f); MoveAndSlide(); return; }
+
+        KeyboardLook(dt);
 
         if (Creative) FlyMove(dt);
         else if (InWater) SwimMove(dt);

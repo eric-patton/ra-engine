@@ -27,8 +27,11 @@ public partial class SettingsPanel : CanvasLayer
         center.AddChild(box);
 
         box.AddChild(UiKit.Title("Settings", 44, UiKit.Gold));
+        box.AddChild(MouseModeRow());
         box.AddChild(Slider("Mouse sensitivity", 0.2f, 3.0f, Settings.MouseSensitivity,
             v => { Settings.MouseSensitivity = v; Settings.Save(); }));
+        box.AddChild(Slider("Keyboard look speed", 40f, 220f, Settings.KeyboardLookSpeed,
+            v => { Settings.KeyboardLookSpeed = v; Settings.Save(); }, "0"));
         box.AddChild(Slider("Master volume", 0f, 1f, Settings.MasterVolume,
             v => { Settings.MasterVolume = v; Settings.Save(); }));
 
@@ -37,19 +40,41 @@ public partial class SettingsPanel : CanvasLayer
         box.AddChild(back);
     }
 
-    private Control Slider(string label, float min, float max, float value, Action<float> onChange)
+    private Control Slider(string label, float min, float max, float value, Action<float> onChange, string fmt = "0.00")
     {
         var row = new VBoxContainer { CustomMinimumSize = new Vector2(420, 0) };
-        var valueLabel = new Label { Text = $"{label}:  {value:0.00}" };
+        var valueLabel = new Label { Text = $"{label}:  {value.ToString(fmt)}" };
         valueLabel.AddThemeFontSizeOverride("font_size", 20);
         row.AddChild(valueLabel);
-        var slider = new HSlider { MinValue = min, MaxValue = max, Step = 0.05, Value = value, CustomMinimumSize = new Vector2(420, 24) };
+        double step = fmt == "0" ? 5 : 0.05;
+        var slider = new HSlider { MinValue = min, MaxValue = max, Step = step, Value = value, CustomMinimumSize = new Vector2(420, 24) };
         slider.ValueChanged += v =>
         {
-            valueLabel.Text = $"{label}:  {v:0.00}";
+            valueLabel.Text = $"{label}:  {((float)v).ToString(fmt)}";
             onChange((float)v);
         };
         row.AddChild(slider);
+        return row;
+    }
+
+    private Control MouseModeRow()
+    {
+        var row = new VBoxContainer { CustomMinimumSize = new Vector2(420, 0) };
+        var label = new Label { Text = "Mouse" };
+        label.AddThemeFontSizeOverride("font_size", 20);
+        row.AddChild(label);
+
+        var opt = new OptionButton { CustomMinimumSize = new Vector2(420, 30) };
+        opt.AddItem("Free cursor — click to look", (int)Settings.MouseCapture.ClickToCapture);
+        opt.AddItem("Keyboard only — never grab mouse", (int)Settings.MouseCapture.Off);
+        opt.AddItem("Always capture (classic FPS)", (int)Settings.MouseCapture.Always);
+        opt.Selected = opt.GetItemIndex((int)Settings.CaptureMode);
+        opt.ItemSelected += idx =>
+        {
+            Settings.CaptureMode = (Settings.MouseCapture)opt.GetItemId((int)idx);
+            Settings.Save();
+        };
+        row.AddChild(opt);
         return row;
     }
 

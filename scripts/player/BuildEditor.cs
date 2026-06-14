@@ -11,6 +11,7 @@ public partial class BuildEditor : Node3D
 {
     public VoxelWorld World;
     public BlockInteractor Interactor;
+    public Player Player;
     public Hotbar Hotbar;
     public GameHud Hud;
     public bool Enabled;
@@ -47,7 +48,9 @@ public partial class BuildEditor : Node3D
     public override void _Process(double delta)
     {
         if (!Enabled || World == null || Interactor == null) return;
-        if (Input.MouseMode != Input.MouseModeEnum.Captured) return;
+        // Editor keys work whether or not the mouse is captured, but never while
+        // the player is locked out (dialogue) — InputEnabled covers both.
+        if (Player != null && !Player.InputEnabled) return;
 
         var t = Interactor.CurrentTarget;
 
