@@ -45,6 +45,11 @@ public partial class Narrator : CanvasLayer
         Relayout();
     }
 
+    public override void _ExitTree()
+    {
+        GetViewport().SizeChanged -= Relayout;
+    }
+
     private void Relayout()
     {
         Vector2 vp = GetViewport().GetVisibleRect().Size;

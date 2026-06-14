@@ -13,7 +13,7 @@ public partial class GameHud : CanvasLayer
     private ProgressBar _health;
     private ProgressBar _air;
     private Label _banner;
-    private Timer _bannerTimer;
+    private int _bannerToken;
     private Control _crosshair;
     private Label _weaponLabel;
 
@@ -266,10 +266,16 @@ public partial class GameHud : CanvasLayer
         AddChild(_banner);
         GetViewport().SizeChanged += RelayoutBanner;
         RelayoutBanner();
+    }
 
-        _bannerTimer = new Timer { OneShot = true };
-        AddChild(_bannerTimer);
-        _bannerTimer.Timeout += () => _banner.Visible = false;
+    public override void _ExitTree()
+    {
+        var vp = GetViewport();
+        if (vp == null) return;
+        vp.SizeChanged -= RelayoutWeapon;
+        vp.SizeChanged -= RelayoutInteract;
+        vp.SizeChanged -= RelayoutObjectives;
+        vp.SizeChanged -= RelayoutBanner;
     }
 
     private void RelayoutBanner()
@@ -296,6 +302,7 @@ public partial class GameHud : CanvasLayer
     {
         _banner.Text = text;
         _banner.Visible = true;
-        _bannerTimer.Start(seconds);
+        int token = ++_bannerToken; // a newer banner cancels an older auto-hide
+        GetTree().CreateTimer(seconds).Timeout += () => { if (token == _bannerToken) _banner.Visible = false; };
     }
 }

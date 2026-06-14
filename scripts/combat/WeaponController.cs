@@ -56,7 +56,9 @@ public partial class WeaponController : Node3D
     {
         if (_cooldown > 0) _cooldown -= (float)delta;
         if (!Enabled || Player == null || Current == null) return;
-        if (Input.MouseMode != Input.MouseModeEnum.Captured) return;
+        // Not while the cursor is free, nor during the brief lockout after a
+        // re-capture (so the click that re-focuses the window doesn't fire).
+        if (Input.MouseMode != Input.MouseModeEnum.Captured || Player.ActionsSuppressed) return;
 
         if (Input.IsActionPressed(GameInput.Actions.Primary) && _cooldown <= 0f)
             PrimaryAttack();

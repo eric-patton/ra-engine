@@ -45,6 +45,9 @@ public partial class Game : Node3D
             case "--test-player":
                 RunPlayerTest();
                 break;
+            case "--test-swim-exit":
+                RunSwimExitTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -62,6 +65,9 @@ public partial class Game : Node3D
                 break;
             case "--lesson-creation":
                 StartLesson(Lessons.LessonCatalog.Get("creation"));
+                break;
+            case "--sandbox":
+                StartSandbox();
                 break;
             case "--test-creation":
                 RunCreationTest();
@@ -422,6 +428,63 @@ public partial class Game : Node3D
                  $"headUnder={player.HeadUnderwater} air={player.Air:F1} hp={player.Health:F1}");
         await Capture("res://_player_water.png", 0.3);
 
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Regression test for the reported "can't jump out of water when the
+    /// ground is level with it" bug: drive the player toward a bank whose top is
+    /// flush with the water surface and verify they climb out onto it.</summary>
+    private async void RunSwimExitTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        Core.WorldGen.FlatGround(world, 0, 32, 0, 32, 0); // grass top surface at y=1
+
+        // A pool whose surface is LEVEL with the surrounding grass: water fills
+        // cells y=0..-2 (so the water top face is at y=1, same as the grass top).
+        ushort water = Core.BlockRegistry.IdOf("water");
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        for (int x = 8; x <= 24; x++)
+        for (int z = 8; z <= 16; z++)
+        {
+            for (int y = 0; y >= -2; y--) world.SetBlock(x, y, z, water, false);
+            world.SetBlock(x, -3, z, stone, false); // pool floor
+        }
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+
+        var player = new PlayerSys.Player { Name = "Player", World = world };
+        AddChild(player);
+        player.GlobalPosition = new Vector3(16, 3, 12); // above the pool centre
+        player.Camera.Current = true;
+        // The body faces -Z by default, so "forward" drives toward the z=7 bank.
+
+        // Let them fall in and settle at the surface.
+        await ToSignal(GetTree().CreateTimer(1.6), SceneTreeTimer.SignalName.Timeout);
+        float floatY = player.GlobalPosition.Y;
+        bool floatIn = player.InWater;
+
+        // Swim forward toward the bank; stop the moment we've climbed out (so we
+        // don't then march across the grass and off the edge of the test world).
+        Input.ActionPress(Core.GameInput.Actions.Forward);
+        bool exited = false;
+        Vector3 exitPos = player.GlobalPosition;
+        for (int i = 0; i < 50 && !exited; i++)
+        {
+            await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
+            Vector3 q = player.GlobalPosition;
+            // out of the pool (z < 8), standing on the bank, head above the waterline
+            if (!player.InWater && player.IsOnFloor() && q.Y > 0.9f && q.Z < 7.8f)
+            {
+                exited = true;
+                exitPos = q;
+            }
+        }
+        Input.ActionRelease(Core.GameInput.Actions.Forward);
+
+        GD.Print($"[RA] swim-exit: floated y={floatY:F2} inWater={floatIn} -> " +
+                 $"exitPos=({exitPos.X:F1},{exitPos.Y:F2},{exitPos.Z:F1}) EXITED_ONTO_BANK={exited}");
         GetTree().Quit(0);
     }
 

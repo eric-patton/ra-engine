@@ -18,7 +18,7 @@ public partial class Player : CharacterBody3D, IDamageable
 
     // movement tuning
     private const float WalkSpeed = 4.6f, SprintSpeed = 7.2f, CrouchSpeed = 2.4f;
-    private const float SwimSpeed = 3.6f, FlySpeed = 9f;
+    private const float SwimSpeed = 3.6f, FlySpeed = 9f, SwimClimbVel = 7f;
     private const float Accel = 12f, AirAccel = 4f, Gravity = 24f, MaxFall = 45f;
     private const float JumpVel = 8.0f;
     private const float FallSafe = 5f, FallDamagePerBlock = 7f;
@@ -35,6 +35,14 @@ public partial class Player : CharacterBody3D, IDamageable
     public bool InWater { get; private set; }
     public bool HeadUnderwater { get; private set; }
 
+    /// <summary>Current capsule height (shrinks while crouching). The block
+    /// interactor reads this so it never wrongly rejects a placement near the body.</summary>
+    public float CollisionHeight => _crouching ? CrouchHeight : StandHeight;
+
+    /// <summary>True briefly after a mouse re-capture, so the click that re-focuses
+    /// the window doesn't also break/place a block or fire a weapon.</summary>
+    public bool ActionsSuppressed => _actionLock > 0f;
+
     private Node3D _head;
     private Camera3D _cam;
     private CollisionShape3D _shape;
@@ -43,6 +51,7 @@ public partial class Player : CharacterBody3D, IDamageable
     private float _airApexY;
     private bool _wasOnFloor = true;
     private float _drownTimer;
+    private float _actionLock;
 
     public Camera3D Camera => _cam;
     public Node3D Head => _head;
@@ -72,6 +81,13 @@ public partial class Player : CharacterBody3D, IDamageable
         Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
+    /// <summary>Ignore break/place/fire input for a short window (used right after
+    /// the mouse is re-captured on window focus, so that click doesn't also act).</summary>
+    public void SuppressActionsFor(float seconds)
+    {
+        if (seconds > _actionLock) _actionLock = seconds;
+    }
+
     public override void _UnhandledInput(InputEvent e)
     {
         if (!InputEnabled) return;
@@ -83,7 +99,8 @@ public partial class Player : CharacterBody3D, IDamageable
             float pitch = Mathf.Clamp(_head.Rotation.X - mm.Relative.Y * sens, -1.5f, 1.5f);
             _head.Rotation = new Vector3(pitch, 0, 0);
         }
-        else if (e.IsActionPressed(GameInput.Actions.ToggleMode))
+        else if (e.IsActionPressed(GameInput.Actions.ToggleMode)
+                 && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
             SetCreative(!Creative);
         }
@@ -92,6 +109,7 @@ public partial class Player : CharacterBody3D, IDamageable
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+        if (_actionLock > 0f) _actionLock -= dt;
         UpdateWaterState();
         UpdateCrouch();
 
@@ -156,14 +174,43 @@ public partial class Player : CharacterBody3D, IDamageable
             // Rise while submerged, settle gently once the head breaches the
             // surface, so an idle swimmer bobs at the waterline and can breathe.
             float buoy = HeadUnderwater ? 2.0f : -0.4f;
-            vel.Y = Mathf.MoveToward(vel.Y, buoy, Gravity * 0.5f * dt);
+            vel.Y = Mathf.MoveToward(vel.Y, buoy, Gravity * 0.35f * dt);
         }
+
+        // Let the player climb out onto a bank that's level with the surface.
+        TrySwimClimb(dir, ref vel);
 
         Velocity = vel;
         MoveAndSlide();
         // no fall damage while swimming
         _airApexY = GlobalPosition.Y;
         _wasOnFloor = IsOnFloor();
+    }
+
+    /// <summary>When swimming and pushing toward a solid block whose top sits within
+    /// about one cell of the feet (a bank), with clear space above it, drive the
+    /// player upward. Combined with the forward input this lifts them out of the
+    /// water and onto ground that is level with the surface.</summary>
+    private void TrySwimClimb(Vector3 wishDir, ref Vector3 vel)
+    {
+        if (World == null) return;
+        var flat = new Vector3(wishDir.X, 0, wishDir.Z);
+        if (flat.LengthSquared() < 0.04f) return;            // need horizontal intent
+        flat = flat.Normalized();
+        Vector3 ahead = GlobalPosition + flat * (Radius + 0.25f);
+        int ax = Mathf.FloorToInt(ahead.X), az = Mathf.FloorToInt(ahead.Z);
+        int feetCell = Mathf.FloorToInt(GlobalPosition.Y + 0.1f);
+        for (int y = feetCell; y <= feetCell + 1; y++)
+        {
+            var ledge = new Vector3I(ax, y, az);
+            if (World.IsSolid(ledge)
+                && !World.IsSolid(ledge + new Vector3I(0, 1, 0))
+                && !World.IsSolid(ledge + new Vector3I(0, 2, 0)))
+            {
+                if (vel.Y < SwimClimbVel) vel.Y = SwimClimbVel;
+                return;
+            }
+        }
     }
 
     private void FlyMove(float dt)
@@ -208,7 +255,10 @@ public partial class Player : CharacterBody3D, IDamageable
         if (World == null) { InWater = HeadUnderwater = false; return; }
         Vector3 p = GlobalPosition;
         float eye = _crouching ? EyeCrouch : EyeStand;
-        InWater = World.GetBlock(FloorV(p + new Vector3(0, 0.5f, 0))).IsLiquid;
+        // Sample low (just above the feet) so swimming engages as soon as the
+        // lower body enters water and stays active until the player has climbed
+        // almost fully out — which is what makes exiting onto a bank feel right.
+        InWater = World.GetBlock(FloorV(p + new Vector3(0, 0.1f, 0))).IsLiquid;
         HeadUnderwater = World.GetBlock(FloorV(p + new Vector3(0, eye, 0))).IsLiquid;
     }
 

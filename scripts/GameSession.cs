@@ -29,6 +29,7 @@ public partial class GameSession : Node3D
     public bool InDialogue { get; private set; }
     public float InteractRange = 3.8f;
     public System.Action ReturnToMenuRequested;
+    private bool _wasFocused = true;
 
     public static readonly string[] DefaultPalette =
     {
@@ -94,9 +95,21 @@ public partial class GameSession : Node3D
     {
         if (Player == null) return;
         Hud.SetUnderwater(Player.HeadUnderwater);
+
+        // Re-grab the mouse when the window regains focus during play (the OS
+        // releases a captured cursor on focus loss and never re-grabs it).
+        bool focused = DisplayServer.WindowIsFocused(0);
+        if (focused && !_wasFocused && !InDialogue && !(Pause?.IsPaused ?? false))
+        {
+            Input.MouseMode = Input.MouseModeEnum.Captured;
+            Player.SuppressActionsFor(0.2f);
+        }
+        _wasFocused = focused;
+
         if (InDialogue) return;
 
-        if (Input.IsActionJustPressed(GameInput.Actions.ToggleBuild) && Input.MouseMode == Input.MouseModeEnum.Captured)
+        if (Input.IsActionJustPressed(GameInput.Actions.ToggleBuild)
+            && Input.MouseMode == Input.MouseModeEnum.Captured && Player.InputEnabled)
         {
             SetMode(CurrentMode == Mode.Build ? Mode.Adventure : Mode.Build);
             Hud.ShowBanner(CurrentMode == Mode.Build ? "Build mode" : "Adventure mode", 1.5f);
@@ -124,17 +137,32 @@ public partial class GameSession : Node3D
         }
     }
 
+    /// <summary>Re-capture the mouse if the player clicks back into the world after
+    /// the OS released the cursor. The triggering click is consumed and a brief
+    /// action lockout keeps it from also breaking/placing or firing.</summary>
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (e is InputEventMouseButton { Pressed: true }
+            && Input.MouseMode != Input.MouseModeEnum.Captured
+            && !InDialogue && !(Pause?.IsPaused ?? false))
+        {
+            Input.MouseMode = Input.MouseModeEnum.Captured;
+            Player?.SuppressActionsFor(0.2f);
+            GetViewport().SetInputAsHandled();
+        }
+    }
+
     private Npc _talkingNpc;
 
     public void StartDialogueWith(Npc npc)
     {
-        _talkingNpc = npc;
-        StartDialogue(npc.Dialogue);
+        StartDialogue(npc.Dialogue, npc);
     }
 
-    public void StartDialogue(DialogueData data)
+    public void StartDialogue(DialogueData data, Npc npc = null)
     {
         if (data == null || InDialogue) return;
+        _talkingNpc = npc;
         InDialogue = true;
         Hud.SetInteractPrompt("");
         Player.InputEnabled = false;

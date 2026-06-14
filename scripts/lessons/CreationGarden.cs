@@ -19,6 +19,7 @@ public sealed class CreationGarden : ILesson
 
     private GameSession _s;
     private int _named;
+    private readonly HashSet<Npc> _namedSet = new();
 
     public void Build(GameSession session)
     {
@@ -78,6 +79,7 @@ public sealed class CreationGarden : ILesson
         a.GlobalPosition = pos;
         a.Talked += () =>
         {
+            if (!_namedSet.Add(a)) return; // count each animal once, not each chat
             _named++;
             _s.Hud.SetObjectives(new[]
             {

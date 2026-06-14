@@ -18,6 +18,7 @@ public partial class DialogueBox : CanvasLayer
     private VBoxContainer _choices;
     private DialogueData _data;
     private DialogueLine _current;
+    private readonly System.Collections.Generic.HashSet<string> _visited = new();
     public bool Active { get; private set; }
 
     public override void _Ready()
@@ -77,12 +78,18 @@ public partial class DialogueBox : CanvasLayer
         _continue.Size = new Vector2(inner, 20);
     }
 
+    public override void _ExitTree()
+    {
+        GetViewport().SizeChanged -= Relayout;
+    }
+
     public void StartDialogue(DialogueData data)
     {
         if (data == null) { EmitSignal(SignalName.Finished); return; }
         _data = data;
         Active = true;
         Visible = true;
+        _visited.Clear();
         ShowNode(data.Start);
     }
 
@@ -90,6 +97,15 @@ public partial class DialogueBox : CanvasLayer
     {
         _current = _data.Get(id);
         if (_current == null) { Finish(); return; }
+        if (!_visited.Add(id))
+        {
+            // A Next-chain looped back on itself — end rather than trap the player
+            // with input locked. (Choice navigation clears the trail, so menus that
+            // legitimately revisit a hub node still work.)
+            GD.PushWarning($"[Dialogue] cycle detected at node '{id}'; ending to avoid a lockup.");
+            Finish();
+            return;
+        }
 
         _speaker.Text = _current.Speaker;
         _text.Text = _current.Text;
@@ -103,7 +119,7 @@ public partial class DialogueBox : CanvasLayer
                 var b = new Button { Text = "• " + choice.Text };
                 b.AddThemeFontSizeOverride("font_size", 18);
                 string next = choice.Next;
-                b.Pressed += () => ShowNode(next);
+                b.Pressed += () => { _visited.Clear(); ShowNode(next); };
                 _choices.AddChild(b);
             }
         }
@@ -141,6 +157,7 @@ public partial class DialogueBox : CanvasLayer
     public void Choose(int i)
     {
         if (!Active || _current?.Choices is not { } cs || i < 0 || i >= cs.Count) return;
+        _visited.Clear(); // an explicit choice is a fresh branch (hubs may revisit)
         ShowNode(cs[i].Next);
     }
 

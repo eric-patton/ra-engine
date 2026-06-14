@@ -17,7 +17,7 @@ public partial class BlockInteractor : Node3D
 
     private MeshInstance3D _highlight;
     private VoxelRay.Hit _target;
-    private float _repeatTimer;
+    private float _breakTimer, _placeTimer;
     private const float RepeatDelay = 0.18f;
 
     /// <summary>The block currently under the crosshair (for the level editor).</summary>
@@ -41,21 +41,30 @@ public partial class BlockInteractor : Node3D
         if (World == null || Player == null) return;
         UpdateTarget();
 
-        if (!CanEdit) return;
-        bool primary = Input.IsActionPressed(GameInput.Actions.Primary);
-        bool secondary = Input.IsActionPressed(GameInput.Actions.Secondary);
-
-        if (Input.IsActionJustPressed(GameInput.Actions.Primary)) { TryBreak(); _repeatTimer = RepeatDelay; }
-        else if (Input.IsActionJustPressed(GameInput.Actions.Secondary)) { TryPlace(); _repeatTimer = RepeatDelay; }
-        else if (primary || secondary)
+        // Don't break/place when editing is off, the cursor is free, or we just
+        // re-captured the mouse (so the re-focus click doesn't also dig/build).
+        if (!CanEdit || Input.MouseMode != Input.MouseModeEnum.Captured || Player.ActionsSuppressed)
         {
-            _repeatTimer -= (float)delta;
-            if (_repeatTimer <= 0f)
-            {
-                if (primary) TryBreak(); else TryPlace();
-                _repeatTimer = RepeatDelay;
-            }
+            _breakTimer = _placeTimer = 0f;
+            return;
         }
+
+        float dt = (float)delta;
+        StepAction(GameInput.Actions.Primary, ref _breakTimer, TryBreak, dt);
+        StepAction(GameInput.Actions.Secondary, ref _placeTimer, TryPlace, dt);
+    }
+
+    // Fire once on press, then auto-repeat while held. Break and place use
+    // independent timers, so holding one never suppresses the other.
+    private void StepAction(string action, ref float timer, System.Func<bool> act, float dt)
+    {
+        if (Input.IsActionJustPressed(action)) { act(); timer = RepeatDelay; return; }
+        if (Input.IsActionPressed(action))
+        {
+            timer -= dt;
+            if (timer <= 0f) { act(); timer = RepeatDelay; }
+        }
+        else timer = 0f;
     }
 
     private void UpdateTarget()
@@ -111,10 +120,11 @@ public partial class BlockInteractor : Node3D
     private bool WouldHitPlayer(Vector3I cell)
     {
         if (Player == null) return false;
-        Vector3 p = Player.GlobalPosition;
-        // player AABB (radius 0.35, height ~1.7 from feet)
-        var pMin = new Vector3(p.X - 0.4f, p.Y, p.Z - 0.4f);
-        var pMax = new Vector3(p.X + 0.4f, p.Y + 1.8f, p.Z + 0.4f);
+        Vector3 p = Player.GlobalPosition;            // feet (bottom of the capsule)
+        const float r = 0.36f;                        // capsule radius (0.35) + a hair
+        float h = Player.CollisionHeight;             // 1.7 standing, 1.1 crouching
+        var pMin = new Vector3(p.X - r, p.Y, p.Z - r);
+        var pMax = new Vector3(p.X + r, p.Y + h, p.Z + r);
         var cMin = (Vector3)cell;
         var cMax = cMin + Vector3.One;
         return pMin.X < cMax.X && pMax.X > cMin.X

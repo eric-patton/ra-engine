@@ -124,6 +124,11 @@ public partial class Hotbar : Control
     public void Next() => Select(_selected + 1);
     public void Prev() => Select(_selected - 1);
 
+    public override void _ExitTree()
+    {
+        if (_connected) { GetViewport().SizeChanged -= Relayout; _connected = false; }
+    }
+
     public override void _UnhandledInput(InputEvent e)
     {
         if (e.IsActionPressed(GameInput.Actions.HotbarNext)) Next();
