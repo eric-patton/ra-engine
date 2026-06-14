@@ -32,6 +32,12 @@ public partial class GameSession : Node3D
     public System.Action ReturnToMenuRequested;
     private bool _wasFocused = true;
 
+    public Inventory Inventory { get; private set; }
+    public bool Survival { get; private set; }
+    private CraftingMenu _craft;
+    private bool _crafting;
+    private Input.MouseModeEnum _preCraftMouse = Input.MouseModeEnum.Visible;
+
     public static readonly string[] DefaultPalette =
     {
         "grass", "dirt", "stone", "cobblestone", "planks", "oak_log", "mud_brick", "leaves", "lamp",
@@ -80,7 +86,7 @@ public partial class GameSession : Node3D
         Dialogue.Finished += OnDialogueFinished;
 
         Pause = new PauseMenu { Name = "PauseMenu" };
-        Pause.CanPause = () => !InDialogue;
+        Pause.CanPause = () => !InDialogue && !_crafting;
         Pause.OnReturnToMenu = () => ReturnToMenuRequested?.Invoke();
         AddChild(Pause);
 
@@ -100,12 +106,67 @@ public partial class GameSession : Node3D
         Input.MouseMode = grab ? Input.MouseModeEnum.Captured : Input.MouseModeEnum.Visible;
     }
 
+    /// <summary>Turn on the survival-style loop: blocks are gathered by breaking and
+    /// spent by placing, the hotbar tracks stack counts, and a Tab crafting menu is
+    /// available. <paramref name="startKit"/> seeds a few stacks so building is easy
+    /// from the start.</summary>
+    public void EnableSurvival(params (string block, int count)[] startKit)
+    {
+        Inventory = new Inventory();
+        Survival = true;
+        foreach (var (block, count) in startKit)
+            Inventory.Add(BlockRegistry.IdOf(block), count);
+
+        Interactor.Inventory = Inventory;
+        Hud.Hotbar.BindInventory(World.Textures, Inventory);
+
+        _craft = new CraftingMenu { Name = "Crafting" };
+        AddChild(_craft);
+        _craft.Setup(Inventory, World.Textures);
+        _craft.OnClose = CloseCrafting;
+    }
+
+    private void ToggleCrafting()
+    {
+        if (_crafting) CloseCrafting();
+        else OpenCrafting();
+    }
+
+    private void OpenCrafting()
+    {
+        _crafting = true;
+        _preCraftMouse = Input.MouseMode;
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        Player.InputEnabled = false;
+        Interactor.CanEdit = false;
+        Hud.SetMouseHint("");
+        _craft.Open();
+    }
+
+    private void CloseCrafting()
+    {
+        _crafting = false;
+        _craft.Visible = false;
+        Input.MouseMode = _preCraftMouse;
+        Player.InputEnabled = true;
+        SetMode(CurrentMode); // restore build/weapon interaction for the mode
+    }
+
     public override void _Process(double delta)
     {
         if (Player == null) return;
         Hud.SetUnderwater(Player.HeadUnderwater);
 
-        bool busy = InDialogue || (Pause?.IsPaused ?? false);
+        bool busy = InDialogue || _crafting || (Pause?.IsPaused ?? false);
+
+        // Tab toggles the crafting menu (survival sandbox only).
+        if (Survival && !InDialogue && !(Pause?.IsPaused ?? false)
+            && Input.IsActionJustPressed(GameInput.Actions.Inventory))
+        {
+            ToggleCrafting();
+            return;
+        }
+        if (_crafting) return;
 
         // Only the classic "Always" mode re-grabs the cursor when the window
         // regains focus; click-to-capture lets the player click back in instead,
@@ -174,7 +235,7 @@ public partial class GameSession : Node3D
         if (Settings.CaptureMode == Settings.MouseCapture.ClickToCapture
             && e is InputEventMouseButton { Pressed: true }
             && Input.MouseMode != Input.MouseModeEnum.Captured
-            && !InDialogue && !(Pause?.IsPaused ?? false))
+            && !InDialogue && !_crafting && !(Pause?.IsPaused ?? false))
         {
             Input.MouseMode = Input.MouseModeEnum.Captured;
             Player?.SuppressActionsFor(0.2f);

@@ -4,9 +4,12 @@ using RAEngine.Core;
 
 namespace RAEngine.UI;
 
-/// <summary>Bottom-of-screen block palette. Number keys 1-9 and the mouse wheel
-/// change the selection; the selected block is what gets placed. Laid out
-/// manually from the viewport size so it stays centred at any resolution.</summary>
+/// <summary>Bottom-of-screen block bar. Number keys 1-9 and the mouse wheel change
+/// the selection; the selected block is what gets placed. Works in two modes:
+/// a fixed palette (creative/editor, no counts) or bound to an
+/// <see cref="Inventory"/> (survival sandbox), where slots track the blocks the
+/// player has gathered and show stack counts. Laid out from the viewport size so
+/// it stays centred at any resolution.</summary>
 public partial class Hotbar : Control
 {
     private const int Slots = 9;
@@ -16,29 +19,47 @@ public partial class Hotbar : Control
     private readonly List<ushort> _blocks = new();
     private readonly Panel[] _panels = new Panel[Slots];
     private readonly TextureRect[] _icons = new TextureRect[Slots];
+    private readonly Label[] _countLabels = new Label[Slots];
     private Label _nameLabel;
     private int _selected;
     private BlockTextures _tex;
+    private Inventory _inventory;
+    private bool _built;
 
     public ushort SelectedBlockId => _selected < _blocks.Count ? _blocks[_selected] : (ushort)0;
 
+    /// <summary>Fixed-palette mode (creative / level editor): infinite blocks, no counts.</summary>
     public void Init(BlockTextures tex, IEnumerable<ushort> blocks)
     {
         _tex = tex;
+        _inventory = null;
         _blocks.Clear();
         _blocks.AddRange(blocks);
-        Build();
+        EnsureBuilt();
+        RefreshSlots();
+        Select(0);
+    }
+
+    /// <summary>Inventory mode (survival sandbox): slots mirror gathered blocks and
+    /// show stack counts; the bar updates whenever the inventory changes.</summary>
+    public void BindInventory(BlockTextures tex, Inventory inv)
+    {
+        _tex = tex;
+        _inventory = inv;
+        inv.Changed += RefreshFromInventory;
+        EnsureBuilt();
+        RefreshFromInventory();
         Select(0);
     }
 
     private bool _connected;
 
-    private void Build()
+    private void EnsureBuilt()
     {
+        if (_built) return;
+        _built = true;
         MouseFilter = MouseFilterEnum.Ignore;
         SetAnchorsPreset(LayoutPreset.FullRect);
-
-        foreach (Node c in GetChildren()) c.QueueFree(); // support reconfigure without leaking
 
         for (int i = 0; i < Slots; i++)
         {
@@ -64,8 +85,19 @@ public partial class Hotbar : Control
             num.Modulate = new Color(1, 1, 1, 0.6f);
             panel.AddChild(num);
 
-            if (i < _blocks.Count && _tex != null)
-                _icons[i].Texture = _tex.GetIcon(BlockRegistry.Get(_blocks[i]));
+            var count = new Label
+            {
+                Visible = false,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Size = new Vector2(SlotSize - 8, 18),
+                Position = new Vector2(4, SlotSize - 22),
+            };
+            count.AddThemeFontSizeOverride("font_size", 16);
+            count.AddThemeColorOverride("font_outline_color", Colors.Black);
+            count.AddThemeConstantOverride("outline_size", 3);
+            count.MouseFilter = MouseFilterEnum.Ignore;
+            panel.AddChild(count);
+            _countLabels[i] = count;
         }
 
         _nameLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
@@ -77,6 +109,31 @@ public partial class Hotbar : Control
 
         if (!_connected) { GetViewport().SizeChanged += Relayout; _connected = true; }
         Relayout();
+    }
+
+    private void RefreshFromInventory()
+    {
+        _blocks.Clear();
+        for (int i = 0; i < _inventory.Order.Count && i < Slots; i++)
+            _blocks.Add(_inventory.Order[i]);
+        RefreshSlots();
+        if (_selected >= _blocks.Count) _selected = Mathf.Max(0, _blocks.Count - 1);
+        Select(_selected);
+    }
+
+    private void RefreshSlots()
+    {
+        for (int i = 0; i < Slots; i++)
+        {
+            bool has = i < _blocks.Count;
+            _icons[i].Texture = has && _tex != null ? _tex.GetIcon(BlockRegistry.Get(_blocks[i])) : null;
+            if (_inventory != null && has)
+            {
+                _countLabels[i].Text = _inventory.Count(_blocks[i]).ToString();
+                _countLabels[i].Visible = true;
+            }
+            else _countLabels[i].Visible = false;
+        }
     }
 
     private void Relayout()
@@ -112,8 +169,12 @@ public partial class Hotbar : Control
 
     public void Select(int index)
     {
-        int count = Mathf.Min(Slots, _blocks.Count); // only cycle through visible slots
-        if (count == 0) return;
+        int count = Mathf.Min(Slots, _blocks.Count); // only cycle through filled slots
+        if (count == 0)
+        {
+            if (_nameLabel != null) _nameLabel.Text = "";
+            return;
+        }
         index = ((index % count) + count) % count;
         if (_selected < Slots) _panels[_selected].AddThemeStyleboxOverride("panel", SlotStyle(false));
         _selected = index;
@@ -127,6 +188,7 @@ public partial class Hotbar : Control
     public override void _ExitTree()
     {
         if (_connected) { GetViewport().SizeChanged -= Relayout; _connected = false; }
+        if (_inventory != null) _inventory.Changed -= RefreshFromInventory;
     }
 
     public override void _UnhandledInput(InputEvent e)

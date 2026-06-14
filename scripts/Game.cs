@@ -71,6 +71,9 @@ public partial class Game : Node3D
             case "--test-sky":
                 RunSkyTest();
                 break;
+            case "--test-craft":
+                RunCraftTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -194,7 +197,12 @@ public partial class Game : Node3D
             Name = "Weather", Generator = gen, Player = _session.Player, Env = _session.Env,
         });
 
-        _session.Hud.ShowBanner("Sandbox — endless world!  (WASD move · arrows/numpad or mouse look · +/- place/break · G fly · B mode)", 6f);
+        // Survival-style building: gather by breaking, spend by placing, craft on Tab.
+        _session.EnableSurvival(
+            ("grass", 64), ("dirt", 64), ("stone", 64), ("cobblestone", 64),
+            ("planks", 64), ("oak_log", 32), ("mud_brick", 64), ("leaves", 32), ("lamp", 8));
+
+        _session.Hud.ShowBanner("Sandbox — endless world!  (WASD move · look mouse/arrows · +/- place/break · G fly · Tab craft)", 6f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();
     }
@@ -630,6 +638,33 @@ public partial class Game : Node3D
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-6 crafting/inventory test: stacks add and consume, recipes
+    /// convert ingredients into output, and unaffordable recipes are blocked.</summary>
+    private void RunCraftTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var inv = new Core.Inventory();
+        ushort log = Core.BlockRegistry.IdOf("oak_log");
+        ushort planks = Core.BlockRegistry.IdOf("planks");
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+
+        inv.Add(log, 2);
+        var planksRecipe = System.Array.Find(Core.CraftBook.All, r => r.Name == "Wood Planks");
+        bool crafted = inv.Craft(planksRecipe);
+        int logsAfter = inv.Count(log), planksAfter = inv.Count(planks);
+
+        var sandstone = System.Array.Find(Core.CraftBook.All, r => r.Name == "Sandstone");
+        bool cantAfford = !inv.CanAfford(sandstone);
+
+        inv.Add(stone, 1);
+        bool consumed = inv.TryConsume(stone, 1);
+        bool emptyDropped = inv.Count(stone) == 0 && !new System.Collections.Generic.List<ushort>(inv.Order).Contains(stone);
+
+        GD.Print($"[RA] craft-test: crafted={crafted} logsAfter={logsAfter} planks={planksAfter} " +
+                 $"cantAfford={cantAfford} consumed={consumed} emptyDropped={emptyDropped}");
+        QuitSoon();
     }
 
     /// <summary>Phase-5 day/night logic test: the sun should dominate at noon, the

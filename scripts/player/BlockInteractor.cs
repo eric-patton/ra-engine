@@ -12,6 +12,9 @@ public partial class BlockInteractor : Node3D
     public VoxelWorld World;
     public Player Player;
     public Hotbar Hotbar;
+    /// <summary>When set (survival sandbox), breaking collects blocks and placing
+    /// consumes them. Null (creative/editor) means unlimited blocks.</summary>
+    public Inventory Inventory;
     public bool CanEdit = true;
     public float Reach = 6f;
 
@@ -112,6 +115,7 @@ public partial class BlockInteractor : Node3D
         var b = World.GetBlock(cell);
         if (b.IsAir) return false;
         World.SetBlock(cell, 0);
+        if (!b.IsLiquid) Inventory?.Add(b.Id); // collect the dropped block
         AudioManager.Play("break");
         return true;
     }
@@ -119,10 +123,12 @@ public partial class BlockInteractor : Node3D
     public bool PlaceAt(Vector3I cell, ushort id)
     {
         if (id == 0) return false;
+        if (Inventory != null && !Inventory.Has(id)) return false; // nothing to place
         var existing = World.GetBlock(cell);
         if (!existing.IsAir && !existing.IsLiquid) return false;
         if (WouldHitPlayer(cell) && BlockRegistry.Get(id).Solid) return false;
         World.SetBlock(cell, id);
+        Inventory?.TryConsume(id);
         AudioManager.Play("place");
         return true;
     }
