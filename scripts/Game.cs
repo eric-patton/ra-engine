@@ -104,6 +104,9 @@ public partial class Game : Node3D
             case "--test-fx":
                 RunFxTest();
                 break;
+            case "--test-ambient":
+                RunAmbientTest();
+                break;
             case "--test-craft":
                 RunCraftTest();
                 break;
@@ -1004,6 +1007,32 @@ public partial class Game : Node3D
         await Capture("res://_fx_hurt.png", 0.05);
 
         GD.Print($"[RA] fx-test: captured debris + hurt flash (health={session.Player.Health:F0})");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Ambient-particle test: glowing fireflies at night, then pale drifting
+    /// motes at noon, both following the player. Run WINDOWED (screenshot path).</summary>
+    private async void RunAmbientTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 24), creative: true, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Player.Head.Rotation = new Vector3(-0.1f, 0, 0);
+
+        // Night: fireflies twinkle around the player.
+        session.Env.SetFixedTime(Core.EnvironmentController.Night);
+        await ToSignal(GetTree().CreateTimer(2.5), SceneTreeTimer.SignalName.Timeout); // let them populate
+        await Capture("res://_ambient_night.png", 0.0);
+
+        // Day: pale motes drift in the sunlight.
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+        await ToSignal(GetTree().CreateTimer(2.5), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_ambient_day.png", 0.0);
+
+        GD.Print("[RA] ambient-test: captured night fireflies + day motes");
         GetTree().Quit(0);
     }
 

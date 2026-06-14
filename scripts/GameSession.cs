@@ -67,6 +67,7 @@ public partial class GameSession : Node3D
         AddChild(Player);
         Player.SetCreative(creative);
         Player.GlobalPosition = spawn;
+        Env.SetWeatherFollow(Player); // weather + ambient particles track the player (sandbox & lessons)
 
         Hud = new GameHud { Name = "Hud" };
         AddChild(Hud);

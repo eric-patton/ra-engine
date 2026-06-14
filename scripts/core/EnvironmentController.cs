@@ -20,6 +20,7 @@ public sealed partial class EnvironmentController : Node3D
     private ShaderMaterial _skyMat;
 
     private GpuParticles3D _rain, _snow;
+    private GpuParticles3D _motes, _fireflies; // ambient life: day motes / night fireflies
     private Node3D _weatherFollow;
     private readonly ValueNoise2D _windNoise = new(9001);
     public Weather Weather { get; private set; } = Weather.Clear;
@@ -88,6 +89,7 @@ public sealed partial class EnvironmentController : Node3D
         AddChild(_moon);
 
         BuildWeather();
+        BuildAmbientParticles();
         Apply();
     }
 
@@ -190,6 +192,110 @@ public sealed partial class EnvironmentController : Node3D
         };
     }
 
+    // ---- ambient life (motes by day, fireflies by night) ------------------
+
+    private void BuildAmbientParticles()
+    {
+        _motes = MakeMotes();
+        _fireflies = MakeFireflies();
+        AddChild(_motes);
+        AddChild(_fireflies);
+    }
+
+    /// <summary>Pale dust/pollen motes drifting slowly in a volume around the player —
+    /// barely-there atmosphere that catches the daylight.</summary>
+    private static GpuParticles3D MakeMotes()
+    {
+        var mat = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+            EmissionBoxExtents = new Vector3(14f, 8f, 14f),
+            Direction = Vector3.Up,
+            Spread = 180f,
+            Gravity = new Vector3(0f, 0.04f, 0f),
+            InitialVelocityMin = 0.08f,
+            InitialVelocityMax = 0.45f,
+            ScaleMin = 0.4f,
+            ScaleMax = 1.0f,
+            Color = new Color(1f, 0.97f, 0.82f, 0.5f),
+            TurbulenceEnabled = true,
+            TurbulenceNoiseStrength = 0.6f,
+            TurbulenceNoiseScale = 1.2f,
+        };
+        var mesh = new QuadMesh { Size = new Vector2(0.04f, 0.04f) };
+        mesh.SurfaceSetMaterial(0, new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            VertexColorUseAsAlbedo = true,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        });
+        return new GpuParticles3D
+        {
+            Name = "Motes",
+            Amount = 90,
+            Lifetime = 7f,
+            Emitting = true,
+            Preprocess = 3f,
+            LocalCoords = false,
+            ProcessMaterial = mat,
+            DrawPass1 = mesh,
+            VisibilityAabb = new Aabb(new Vector3(-22, -22, -22), new Vector3(44, 44, 44)),
+        };
+    }
+
+    /// <summary>Warm glowing fireflies that wander near the ground at night. They use
+    /// an additive material (so the Glow blooms them) and a fade-in/out colour ramp
+    /// over each particle's life, so a field of them twinkles.</summary>
+    private static GpuParticles3D MakeFireflies()
+    {
+        var ramp = new Gradient
+        {
+            Offsets = new float[] { 0f, 0.5f, 1f },
+            Colors = new Color[] { new(1, 1, 1, 0), new(1, 1, 1, 1), new(1, 1, 1, 0) },
+        };
+        var mat = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+            EmissionBoxExtents = new Vector3(12f, 2.5f, 12f),
+            Direction = Vector3.Up,
+            Spread = 180f,
+            Gravity = Vector3.Zero,
+            InitialVelocityMin = 0.2f,
+            InitialVelocityMax = 0.7f,
+            ScaleMin = 0.5f,
+            ScaleMax = 1.2f,
+            Color = new Color(1f, 0.85f, 0.35f),
+            ColorRamp = new GradientTexture1D { Gradient = ramp },
+            TurbulenceEnabled = true,
+            TurbulenceNoiseStrength = 1.4f,
+            TurbulenceNoiseScale = 1.6f,
+        };
+        var mesh = new QuadMesh { Size = new Vector2(0.07f, 0.07f) };
+        mesh.SurfaceSetMaterial(0, new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            BlendMode = BaseMaterial3D.BlendModeEnum.Add,
+            VertexColorUseAsAlbedo = true,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        });
+        return new GpuParticles3D
+        {
+            Name = "Fireflies",
+            Amount = 44,
+            Lifetime = 3.5f,
+            Emitting = true,
+            Preprocess = 2f,
+            LocalCoords = false,
+            ProcessMaterial = mat,
+            DrawPass1 = mesh,
+            VisibilityAabb = new Aabb(new Vector3(-18, -18, -18), new Vector3(36, 36, 36)),
+        };
+    }
+
     private void UpdateWeather()
     {
         // Wind drifts slowly and deterministically; it pushes precipitation and
@@ -206,6 +312,14 @@ public sealed partial class EnvironmentController : Node3D
                 pm.Gravity = new Vector3(Wind.X, p == _rain ? -35f : -2.5f, Wind.Y);
             if (_weatherFollow != null && GodotObject.IsInstanceValid(_weatherFollow))
                 p.GlobalPosition = _weatherFollow.GlobalPosition + new Vector3(0f, 16f, 0f);
+        }
+
+        // Ambient life follows the player too (motes centred, fireflies near the ground).
+        if (_weatherFollow != null && GodotObject.IsInstanceValid(_weatherFollow))
+        {
+            Vector3 fp = _weatherFollow.GlobalPosition;
+            if (_motes != null) _motes.GlobalPosition = fp + new Vector3(0f, 2f, 0f);
+            if (_fireflies != null) _fireflies.GlobalPosition = fp + new Vector3(0f, 0.6f, 0f);
         }
     }
 
@@ -236,6 +350,10 @@ public sealed partial class EnvironmentController : Node3D
         _skyMat.SetShaderParameter("sun_dir", toSun);
         _skyMat.SetShaderParameter("moon_dir", toMoon);
         _skyMat.SetShaderParameter("day", dayFactor);
+
+        // Crossfade ambient life with the light: motes by day, fireflies by night.
+        if (_motes != null) _motes.AmountRatio = Mathf.Clamp(dayFactor, 0f, 1f);
+        if (_fireflies != null) _fireflies.AmountRatio = Mathf.Clamp(1f - dayFactor, 0f, 1f);
 
         var env = _we.Environment;
         env.FogLightColor = HorizonNight.Lerp(HorizonDay, dayFactor);
