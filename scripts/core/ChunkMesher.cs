@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -91,51 +92,167 @@ public static class ChunkMesher
 
     // ---- step 2: build geometry (worker thread) ---------------------------
 
+    /// <summary>Greedy-meshes the chunk: for each of the six face directions, every
+    /// 16×16 slice is reduced to as few rectangles as possible. Faces only merge
+    /// when they share a texture layer and a <em>uniform</em> AO level (all four
+    /// corners equal), which keeps the merged result pixel-identical to per-face
+    /// meshing — a flat quad interpolates a uniform corner value to the same shade.
+    /// Faces that have an AO gradient (near edges/occluders) are emitted 1×1 with
+    /// their four distinct corner values, exactly as before.</summary>
     public static MeshData BuildData(Snapshot snap)
     {
         var md = new MeshData();
+        const int N = Chunk.Size;
 
-        for (int y = 0; y < Chunk.Size; y++)
-        for (int z = 0; z < Chunk.Size; z++)
-        for (int x = 0; x < Chunk.Size; x++)
+        // Per-slice scratch, reused across all six faces (one chunk = one thread).
+        var has = new bool[N * N];
+        var used = new bool[N * N];
+        var layerArr = new int[N * N];
+        var waterArr = new bool[N * N];
+        var solidArr = new bool[N * N];
+        var aoFlat = new int[N * N];        // 0..3 uniform level, or -1 when the AO varies
+        var aoCorners = new int[N * N * 4]; // per-corner levels, used for the 1×1 path
+
+        for (int f = 0; f < 6; f++)
         {
-            ushort id = snap.Get(x, y, z);
-            if (id == 0) continue;
-            var self = BlockRegistry.Get(id);
-            var local = new Vector3(x, y, z);
+            Vector3I nrm = VoxelGeometry.Normals[f];
+            Vector3I du = VoxelGeometry.Du[f], dv = VoxelGeometry.Dv[f];
+            // Unit step along the slice (normal) axis, sign-independent.
+            var naUnit = new Vector3I(Mathf.Abs(nrm.X), Mathf.Abs(nrm.Y), Mathf.Abs(nrm.Z));
 
-            for (int f = 0; f < 6; f++)
+            for (int s = 0; s < N; s++)
             {
-                Vector3I nrm = VoxelGeometry.Normals[f];
-                var nCell = new Vector3I(x + nrm.X, y + nrm.Y, z + nrm.Z); // snapshot-local
-                ushort nbId = snap.Get(nCell.X, nCell.Y, nCell.Z);
-                if (!ShouldDraw(self, id, BlockRegistry.Get(nbId), nbId)) continue;
-
-                bool water = self.Render == RenderType.Water;
-                Surface surf = water ? md.Water : md.Opaque;
-                int baseIdx = surf.Count;
-
-                int layer = self.FaceLayer[f];
-                Vector3 normal = nrm;
-                var tangent = new Plane(VoxelGeometry.Tangents[f], 1f);
-                Vector3I du = VoxelGeometry.Du[f], dv = VoxelGeometry.Dv[f];
-
-                for (int ci = 0; ci < 4; ci++)
+                // 1. Build the visible-face mask for this slice.
+                for (int j = 0; j < N; j++)
+                for (int i = 0; i < N; i++)
                 {
-                    Vector2 uv = VoxelGeometry.Uvs[ci];
-                    float ao = water ? 1f : VertexAo(snap, nCell, du, dv, uv);
-                    surf.AddVertex(local + VoxelGeometry.Corners[f][ci], normal, tangent, uv,
-                        new Color(layer, ao, 0f, 0f));
-                }
-                foreach (int t in VoxelGeometry.TriOrder)
-                    surf.Indices.Add(baseIdx + t);
+                    int m = j * N + i;
+                    has[m] = false;
+                    used[m] = false;
 
-                if (self.Solid)
-                    foreach (int t in VoxelGeometry.TriOrder)
-                        md.Collision.Add(local + VoxelGeometry.Corners[f][t]);
+                    Vector3I cell = naUnit * s + du * i + dv * j;
+                    ushort id = snap.Get(cell.X, cell.Y, cell.Z);
+                    if (id == 0) continue;
+                    var self = BlockRegistry.Get(id);
+                    Vector3I air = cell + nrm;
+                    ushort nbId = snap.Get(air.X, air.Y, air.Z);
+                    if (!ShouldDraw(self, id, BlockRegistry.Get(nbId), nbId)) continue;
+
+                    has[m] = true;
+                    bool water = self.Render == RenderType.Water;
+                    layerArr[m] = self.FaceLayer[f];
+                    waterArr[m] = water;
+                    solidArr[m] = self.Solid;
+
+                    int l0, l1, l2, l3;
+                    if (water)
+                    {
+                        l0 = l1 = l2 = l3 = 3; // water never bakes AO
+                    }
+                    else
+                    {
+                        l0 = AoLevel(snap, air, du, dv, VoxelGeometry.Uvs[0]);
+                        l1 = AoLevel(snap, air, du, dv, VoxelGeometry.Uvs[1]);
+                        l2 = AoLevel(snap, air, du, dv, VoxelGeometry.Uvs[2]);
+                        l3 = AoLevel(snap, air, du, dv, VoxelGeometry.Uvs[3]);
+                    }
+                    aoCorners[m * 4 + 0] = l0;
+                    aoCorners[m * 4 + 1] = l1;
+                    aoCorners[m * 4 + 2] = l2;
+                    aoCorners[m * 4 + 3] = l3;
+                    aoFlat[m] = (l0 == l1 && l1 == l2 && l2 == l3) ? l0 : -1;
+                }
+
+                // 2. Greedy-merge equal flat faces into rectangles; emit gradients 1×1.
+                for (int j = 0; j < N; j++)
+                for (int i = 0; i < N; i++)
+                {
+                    int m = j * N + i;
+                    if (!has[m] || used[m]) continue;
+
+                    Vector3I baseCell = naUnit * s + du * i + dv * j;
+
+                    if (aoFlat[m] < 0)
+                    {
+                        EmitQuad(md, f, baseCell, 1, 1, layerArr[m], waterArr[m], solidArr[m],
+                            aoCorners[m * 4], aoCorners[m * 4 + 1], aoCorners[m * 4 + 2], aoCorners[m * 4 + 3]);
+                        used[m] = true;
+                        continue;
+                    }
+
+                    int kLayer = layerArr[m], kAo = aoFlat[m];
+                    bool kWater = waterArr[m], kSolid = solidArr[m];
+
+                    int w = 1;
+                    while (i + w < N && Mergeable(j * N + i + w, has, used, aoFlat, layerArr, waterArr, solidArr,
+                               kAo, kLayer, kWater, kSolid))
+                        w++;
+
+                    int h = 1;
+                    bool stop = false;
+                    while (j + h < N && !stop)
+                    {
+                        for (int k = 0; k < w; k++)
+                            if (!Mergeable((j + h) * N + i + k, has, used, aoFlat, layerArr, waterArr, solidArr,
+                                    kAo, kLayer, kWater, kSolid))
+                            { stop = true; break; }
+                        if (!stop) h++;
+                    }
+
+                    for (int jj = j; jj < j + h; jj++)
+                    for (int ii = i; ii < i + w; ii++)
+                        used[jj * N + ii] = true;
+
+                    EmitQuad(md, f, baseCell, w, h, kLayer, kWater, kSolid, kAo, kAo, kAo, kAo);
+                }
             }
         }
         return md;
+    }
+
+    private static bool Mergeable(int m, bool[] has, bool[] used, int[] aoFlat,
+        int[] layerArr, bool[] waterArr, bool[] solidArr,
+        int kAo, int kLayer, bool kWater, bool kSolid) =>
+        has[m] && !used[m] && aoFlat[m] == kAo && layerArr[m] == kLayer
+        && waterArr[m] == kWater && solidArr[m] == kSolid;
+
+    /// <summary>Emit one (possibly merged) quad of <paramref name="w"/>×<paramref name="h"/>
+    /// cells. The quad runs <paramref name="w"/> cells along the face's du axis and
+    /// <paramref name="h"/> along dv; UVs run 0..w / 0..h so the texture tiles
+    /// (the shader samples with repeat). Corner AO levels are passed explicitly so
+    /// the gradient (1×1) and uniform (merged) paths share one code path.</summary>
+    private static void EmitQuad(MeshData md, int f, Vector3I baseCell, int w, int h,
+        int layer, bool water, bool solid, int ao0, int ao1, int ao2, int ao3)
+    {
+        Surface surf = water ? md.Water : md.Opaque;
+        int baseIdx = surf.Count;
+
+        var baseLocal = new Vector3(baseCell.X, baseCell.Y, baseCell.Z);
+        Vector3 o = VoxelGeometry.Corners[f][0];
+        Vector3I dui = VoxelGeometry.Du[f], dvi = VoxelGeometry.Dv[f];
+        var duv = new Vector3(dui.X, dui.Y, dui.Z) * w;
+        var dvv = new Vector3(dvi.X, dvi.Y, dvi.Z) * h;
+        Vector3 normal = VoxelGeometry.Normals[f];
+        var tangent = new Plane(VoxelGeometry.Tangents[f], 1f);
+
+        Vector3 p0 = baseLocal + o;
+        Vector3 p1 = baseLocal + o + duv;
+        Vector3 p2 = baseLocal + o + duv + dvv;
+        Vector3 p3 = baseLocal + o + dvv;
+
+        surf.AddVertex(p0, normal, tangent, new Vector2(0, 0), new Color(layer, ao0 / 3f, 0f, 0f));
+        surf.AddVertex(p1, normal, tangent, new Vector2(w, 0), new Color(layer, ao1 / 3f, 0f, 0f));
+        surf.AddVertex(p2, normal, tangent, new Vector2(w, h), new Color(layer, ao2 / 3f, 0f, 0f));
+        surf.AddVertex(p3, normal, tangent, new Vector2(0, h), new Color(layer, ao3 / 3f, 0f, 0f));
+        foreach (int t in VoxelGeometry.TriOrder)
+            surf.Indices.Add(baseIdx + t);
+
+        if (solid)
+        {
+            Span<Vector3> c = stackalloc Vector3[4] { p0, p1, p2, p3 };
+            foreach (int t in VoxelGeometry.TriOrder)
+                md.Collision.Add(c[t]);
+        }
     }
 
     private static bool ShouldDraw(BlockType self, ushort selfId, BlockType nb, ushort nbId)
@@ -146,18 +263,17 @@ public static class ChunkMesher
         return true;
     }
 
-    /// <summary>Classic 0..1 ambient occlusion for one face corner from the three
-    /// blocks diagonally in front of the face. All samples stay within the
+    /// <summary>Classic 0..3 ambient-occlusion level for one face corner from the
+    /// three blocks diagonally in front of the face. All samples stay within the
     /// one-cell border captured in the snapshot.</summary>
-    private static float VertexAo(Snapshot snap, Vector3I airCell, Vector3I du, Vector3I dv, Vector2 uv)
+    private static int AoLevel(Snapshot snap, Vector3I airCell, Vector3I du, Vector3I dv, Vector2 uv)
     {
         int su = uv.X > 0.5f ? 1 : -1;
         int sv = uv.Y > 0.5f ? 1 : -1;
         bool s1 = IsOpaque(snap, airCell + du * su);
         bool s2 = IsOpaque(snap, airCell + dv * sv);
         bool corner = IsOpaque(snap, airCell + du * su + dv * sv);
-        int level = (s1 && s2) ? 0 : 3 - ((s1 ? 1 : 0) + (s2 ? 1 : 0) + (corner ? 1 : 0));
-        return level / 3f;
+        return (s1 && s2) ? 0 : 3 - ((s1 ? 1 : 0) + (s2 ? 1 : 0) + (corner ? 1 : 0));
     }
 
     private static bool IsOpaque(Snapshot snap, Vector3I c) =>

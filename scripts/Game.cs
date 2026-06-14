@@ -59,6 +59,9 @@ public partial class Game : Node3D
             case "--test-stream":
                 RunStreamTest();
                 break;
+            case "--test-greedy":
+                RunGreedyTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -610,6 +613,29 @@ public partial class Game : Node3D
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-3 greedy-meshing test: a flat 16×16 grass slab (one chunk
+    /// layer) should collapse to a handful of merged quads — six faces, all with
+    /// uniform AO — instead of the ~576 unmerged faces it would otherwise be.</summary>
+    private void RunGreedyTest()
+    {
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        ushort grass = Core.BlockRegistry.IdOf("grass");
+        for (int x = 0; x < Core.Chunk.Size; x++)
+        for (int z = 0; z < Core.Chunk.Size; z++)
+            world.SetBlock(x, 0, z, grass, false);
+
+        var chunk = world.Chunks[new Vector3I(0, 0, 0)];
+        var snap = Core.ChunkMesher.Capture(world, chunk);
+        var data = Core.ChunkMesher.BuildData(snap);
+        int verts = data.VertexCount;
+        int tris = (data.Opaque.Indices.Count + data.Water.Indices.Count) / 3;
+        // 6 faces (top, bottom, four side strips) -> 6 quads -> 24 verts, 12 tris.
+        bool merged = verts <= 32;
+        GD.Print($"[RA] greedy-test: verts={verts} tris={tris} collisionVerts={data.Collision.Count} merged={merged}");
+        QuitSoon();
     }
 
     /// <summary>Phase-3 streaming test: a procedural world should load chunks around
