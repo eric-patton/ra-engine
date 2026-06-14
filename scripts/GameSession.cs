@@ -17,6 +17,7 @@ public partial class GameSession : Node3D
     public enum Mode { Build, Adventure }
 
     public VoxelWorld World { get; private set; }
+    public EnvironmentController Env { get; private set; }
     public Player Player { get; private set; }
     public GameHud Hud { get; private set; }
     public BlockInteractor Interactor { get; private set; }
@@ -42,7 +43,7 @@ public partial class GameSession : Node3D
     /// path) honours <see cref="Settings.CaptureMode"/>.</summary>
     public void Setup(Vector3 spawn, bool creative, IEnumerable<string> palette = null, bool? captureMouse = null)
     {
-        Scenery.AddDaylight(this);
+        Env = Scenery.AddDaylight(this);
 
         World = new VoxelWorld { Name = "World" };
         AddChild(World); // _Ready builds textures + material

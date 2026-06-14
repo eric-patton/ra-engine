@@ -65,6 +65,12 @@ public partial class Game : Node3D
             case "--test-biomes":
                 RunBiomeTest();
                 break;
+            case "--test-daynight":
+                RunDayNightTest();
+                break;
+            case "--test-sky":
+                RunSkyTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -615,6 +621,53 @@ public partial class Game : Node3D
 
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-5 day/night logic test: the sun should dominate at noon, the
+    /// moon at midnight, and they should swap with the time of day.</summary>
+    private void RunDayNightTest()
+    {
+        var env = new Core.EnvironmentController { Name = "Env" };
+        AddChild(env); // _Ready builds sun/moon synchronously
+
+        env.SetFixedTime(Core.EnvironmentController.Noon);
+        bool noonOk = env.Sun.Visible && env.Sun.LightEnergy > 1.0f && !env.Moon.Visible;
+        float noonSun = env.Sun.LightEnergy;
+
+        env.SetFixedTime(Core.EnvironmentController.Night);
+        bool nightOk = !env.Sun.Visible && env.Moon.Visible && env.Moon.LightEnergy > 0.05f;
+        float midnightMoon = env.Moon.LightEnergy;
+
+        env.SetFixedTime(Core.EnvironmentController.Dawn);
+        bool dawnOk = env.Sun.Visible && env.Sun.LightEnergy < noonSun;
+
+        GD.Print($"[RA] daynight-test: noonOk={noonOk} nightOk={nightOk} dawnOk={dawnOk} " +
+                 $"noonSun={noonSun:F2} midnightMoon={midnightMoon:F2}");
+        QuitSoon();
+    }
+
+    /// <summary>Phase-5 sky render test: screenshot the world at noon, dusk and night
+    /// to eyeball the sky shader (sun, clouds, stars) and the lighting swing.</summary>
+    private async void RunSkyTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 8, 24), creative: true, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, -8, 56, -8, 56, 0);
+        for (int i = 0; i < 6; i++)
+            Core.WorldGen.Tree(session.World, new Vector3I(12 + i * 6, 1, 30));
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Player.Head.Rotation = new Vector3(-0.05f, 0, 0);
+
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+        await Capture("res://_sky_noon.png", 0.6);
+        session.Env.SetFixedTime(Core.EnvironmentController.Dusk);
+        await Capture("res://_sky_dusk.png", 0.6);
+        session.Env.SetFixedTime(Core.EnvironmentController.Night);
+        await Capture("res://_sky_night.png", 0.6);
+        GD.Print("[RA] sky-test: done");
         GetTree().Quit(0);
     }
 
