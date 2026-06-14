@@ -31,6 +31,9 @@ public partial class Player : CharacterBody3D, IDamageable
     public float MaxAir = 10f, Air = 10f;
     public bool Creative = false;
     public bool InputEnabled = true;
+    /// <summary>Teacher "safe mode": ignore all incoming damage (combat + hazards),
+    /// so a class can explore a lesson without dying.</summary>
+    public bool SafeMode = false;
     public bool IsDead { get; private set; }
     public bool InWater { get; private set; }
     public bool HeadUnderwater { get; private set; }
@@ -372,7 +375,7 @@ public partial class Player : CharacterBody3D, IDamageable
 
     public void Damage(float amount, string cause = "")
     {
-        if (IsDead || Creative || amount <= 0) return;
+        if (IsDead || Creative || SafeMode || amount <= 0) return;
         Health = Mathf.Max(0, Health - amount);
         EmitSignal(SignalName.HealthChanged, Health, MaxHealth);
         // Discrete hits/falls yelp; the tiny per-frame hazard ticks don't (and a

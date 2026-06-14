@@ -85,6 +85,9 @@ public partial class Game : Node3D
             case "--test-persist":
                 RunPersistTest();
                 break;
+            case "--test-teacher":
+                RunTeacherTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -273,6 +276,7 @@ public partial class Game : Node3D
         var kit = new System.Collections.Generic.List<(string, int)>();
         foreach (var (block, count) in save.Inventory) kit.Add((block, count));
         _session.EnableSurvival(kit.ToArray());
+        _session.RestoreTeacherState(save.Signposts, save.Waypoints);
 
         var autosave = new Timer { Name = "AutoSave", WaitTime = 60, Autostart = true, OneShot = false };
         _session.AddChild(autosave);
@@ -715,6 +719,37 @@ public partial class Game : Node3D
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-8 teacher-tools test: safe mode blocks damage, and signposts
+    /// and waypoints round-trip through a save.</summary>
+    private void RunTeacherTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var player = new PlayerSys.Player { Name = "P", InputEnabled = false };
+        AddChild(player);
+
+        player.SafeMode = true;
+        float hp0 = player.Health;
+        player.Damage(50, "hit");
+        bool safeBlocks = Mathf.IsEqualApprox(player.Health, hp0);
+        player.SafeMode = false;
+        player.Damage(10, "hit");
+        bool unsafeHurts = player.Health < hp0;
+
+        var d = new Core.SaveData { Name = "__teacher_test__", Seed = 1 };
+        d.Signposts.Add((new Vector3(1, 2, 3), "John 3:16"));
+        d.Waypoints.Add(("Camp", new Vector3(4, 5, 6)));
+        Core.SaveSystem.Save(d);
+        var loaded = Core.SaveSystem.Load("__teacher_test__");
+        bool signOk = loaded != null && loaded.Signposts.Count == 1
+            && loaded.Signposts[0].text == "John 3:16" && loaded.Signposts[0].pos == new Vector3(1, 2, 3);
+        bool wpOk = loaded != null && loaded.Waypoints.Count == 1
+            && loaded.Waypoints[0].name == "Camp" && loaded.Waypoints[0].pos == new Vector3(4, 5, 6);
+        Core.SaveSystem.Delete("__teacher_test__");
+
+        GD.Print($"[RA] teacher-test: safeBlocks={safeBlocks} unsafeHurts={unsafeHurts} signOk={signOk} wpOk={wpOk}");
+        QuitSoon();
     }
 
     /// <summary>Phase-7 persistence test: a save round-trips through disk, and a

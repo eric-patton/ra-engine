@@ -64,6 +64,10 @@ public static class GameInput
         Key(Actions.Capture, Godot.Key.C);
         Key(Actions.Stamp, Godot.Key.V);
         Key(Actions.ToggleBuild, Godot.Key.B);
+
+        // teacher tools
+        Key(Actions.Teacher, Godot.Key.F1);
+        Key(Actions.Screenshot, Godot.Key.F2);
     }
 
     private static void Ensure(string action)
@@ -122,5 +126,7 @@ public static class GameInput
         public const string Capture = "editor_capture";
         public const string Stamp = "editor_stamp";
         public const string ToggleBuild = "toggle_build";
+        public const string Teacher = "teacher";
+        public const string Screenshot = "screenshot";
     }
 }

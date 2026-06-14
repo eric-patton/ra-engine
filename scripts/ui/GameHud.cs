@@ -30,6 +30,63 @@ public partial class GameHud : CanvasLayer
         BuildInteractPrompt();
         BuildMouseHint();
         BuildObjectives();
+        BuildCompass();
+    }
+
+    // ---- compass ----------------------------------------------------------
+
+    private Control _compass;
+    private float _heading; // degrees; 0 = North (-Z), 90 = East (+X)
+    private bool _compassOn;
+
+    private void BuildCompass()
+    {
+        _compass = new Control { Name = "Compass", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _compass.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        AddChild(_compass);
+        _compass.Draw += DrawCompass;
+        GetViewport().SizeChanged += () => _compass.QueueRedraw();
+    }
+
+    public void SetCompassEnabled(bool on)
+    {
+        _compassOn = on;
+        _compass.Visible = on;
+    }
+
+    public void SetHeading(float headingDegrees)
+    {
+        if (!_compassOn) return;
+        _heading = headingDegrees;
+        _compass.QueueRedraw();
+    }
+
+    private void DrawCompass()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        float cx = vp.X / 2f, y = 22f, halfW = 230f, halfFov = 70f;
+        var dim = new Color(1, 1, 1, 0.35f);
+        var bright = new Color(1f, 0.92f, 0.55f);
+        _compass.DrawLine(new Vector2(cx - halfW, y + 26), new Vector2(cx + halfW, y + 26), dim, 2f);
+        _compass.DrawLine(new Vector2(cx, y + 12), new Vector2(cx, y + 40), bright, 2f); // centre tick
+
+        (float ang, string s)[] marks =
+        {
+            (0, "N"), (45, "NE"), (90, "E"), (135, "SE"),
+            (180, "S"), (225, "SW"), (270, "W"), (315, "NW"),
+        };
+        var font = ThemeDB.FallbackFont;
+        foreach (var (ang, s) in marks)
+        {
+            float delta = Mathf.Wrap(ang - _heading, -180f, 180f);
+            if (Mathf.Abs(delta) > halfFov) continue;
+            float x = cx + (delta / halfFov) * halfW;
+            bool card = s.Length == 1;
+            int size = card ? 22 : 15;
+            Vector2 ts = font.GetStringSize(s, HorizontalAlignment.Left, -1, size);
+            _compass.DrawString(font, new Vector2(x - ts.X / 2f, y + 8), s, HorizontalAlignment.Left, -1, size,
+                card ? bright : new Color(1, 1, 1, 0.7f));
+        }
     }
 
     private void BuildUnderwater()

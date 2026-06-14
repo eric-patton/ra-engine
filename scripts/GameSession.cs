@@ -38,6 +38,14 @@ public partial class GameSession : Node3D
     private bool _crafting;
     private Input.MouseModeEnum _preCraftMouse = Input.MouseModeEnum.Visible;
 
+    // Teacher tools.
+    private TeacherPanel _teacher;
+    private bool _teacherOpen;
+    private bool _presentMode;
+    private Input.MouseModeEnum _preTeacherMouse = Input.MouseModeEnum.Visible;
+    private readonly List<(string name, Vector3 pos)> _waypoints = new();
+    private readonly List<RAEngine.World.Signpost> _signposts = new();
+
     public static readonly string[] DefaultPalette =
     {
         "grass", "dirt", "stone", "cobblestone", "planks", "oak_log", "mud_brick", "leaves", "lamp",
@@ -86,7 +94,7 @@ public partial class GameSession : Node3D
         Dialogue.Finished += OnDialogueFinished;
 
         Pause = new PauseMenu { Name = "PauseMenu" };
-        Pause.CanPause = () => !InDialogue && !_crafting;
+        Pause.CanPause = () => !InDialogue && !_crafting && !_teacherOpen && !_presentMode;
         Pause.OnReturnToMenu = () => ReturnToMenuRequested?.Invoke();
         AddChild(Pause);
 
@@ -104,6 +112,126 @@ public partial class GameSession : Node3D
         Player.Camera.Current = true;
         bool grab = captureMouse ?? (Settings.CaptureMode == Settings.MouseCapture.Always);
         Input.MouseMode = grab ? Input.MouseModeEnum.Captured : Input.MouseModeEnum.Visible;
+
+        EnableTeacherTools();
+    }
+
+    // ---- teacher tools ----------------------------------------------------
+
+    private void EnableTeacherTools()
+    {
+        Hud.SetCompassEnabled(true);
+        _teacher = new TeacherPanel { Name = "TeacherPanel" };
+        AddChild(_teacher);
+        _teacher.GetSafe = () => Player.SafeMode;
+        _teacher.SetSafe = on =>
+        {
+            Player.SafeMode = on;
+            Hud.ShowBanner(on ? "Safe mode ON — no combat damage" : "Safe mode OFF", 1.6f);
+        };
+        _teacher.OnPresent = EnterPresentMode;
+        _teacher.OnPlaceSignpost = PlaceSignpostAtLook;
+        _teacher.OnAddWaypoint = AddWaypointHere;
+        _teacher.GetWaypoints = () => _waypoints;
+        _teacher.OnTeleport = TeleportToWaypoint;
+        _teacher.OnClose = CloseTeacher;
+    }
+
+    private void ToggleTeacher()
+    {
+        if (_teacherOpen) CloseTeacher();
+        else OpenTeacher();
+    }
+
+    private void OpenTeacher()
+    {
+        _teacherOpen = true;
+        _preTeacherMouse = Input.MouseMode;
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        Player.InputEnabled = false;
+        Hud.SetMouseHint("");
+        _teacher.Open();
+    }
+
+    private void CloseTeacher()
+    {
+        _teacherOpen = false;
+        _teacher.Visible = false;
+        Input.MouseMode = _preTeacherMouse;
+        Player.InputEnabled = true;
+    }
+
+    private void EnterPresentMode()
+    {
+        _presentMode = true;
+        Hud.Visible = false;
+        // keep the cursor free so the teacher can move the mouse off-screen
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        Player.SuppressActionsFor(0.2f);
+    }
+
+    private void ExitPresentMode()
+    {
+        _presentMode = false;
+        Hud.Visible = true;
+    }
+
+    private void AddWaypointHere()
+    {
+        _waypoints.Add(($"Waypoint {_waypoints.Count + 1}", Player.GlobalPosition));
+        Hud.ShowBanner("Waypoint set", 1.4f);
+    }
+
+    private void TeleportToWaypoint(int index)
+    {
+        if (index < 0 || index >= _waypoints.Count) return;
+        Player.Velocity = Vector3.Zero;
+        Player.GlobalPosition = _waypoints[index].pos + Vector3.Up * 0.2f;
+        Hud.ShowBanner($"Teleported to {_waypoints[index].name}", 1.6f);
+    }
+
+    private void PlaceSignpostAtLook(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) text = "…";
+        // Find the cell the player is looking at; sit the post just in front of it.
+        Camera3D cam = Player.Camera;
+        var hit = Core.VoxelRay.Cast(World, cam.GlobalPosition, -cam.GlobalTransform.Basis.Z, 8f);
+        Vector3 pos = hit.Ok ? (Vector3)hit.Prev + new Vector3(0.5f, 0f, 0.5f)
+                             : Player.GlobalPosition - Player.GlobalTransform.Basis.Z * 2f;
+        var sign = RAEngine.World.Signpost.Create(pos, text);
+        World.AddChild(sign);
+        _signposts.Add(sign);
+        Hud.ShowBanner("Signpost placed", 1.6f);
+    }
+
+    /// <summary>Restore signposts and waypoints from a save (called after Setup).</summary>
+    public void RestoreTeacherState(
+        IEnumerable<(Vector3 pos, string text)> signposts,
+        IEnumerable<(string name, Vector3 pos)> waypoints)
+    {
+        foreach (var (pos, text) in signposts)
+        {
+            var s = RAEngine.World.Signpost.Create(pos, text);
+            World.AddChild(s);
+            _signposts.Add(s);
+        }
+        _waypoints.AddRange(waypoints);
+    }
+
+    public IReadOnlyList<(string name, Vector3 pos)> Waypoints => _waypoints;
+    public IEnumerable<(Vector3 pos, string text)> Signposts()
+    {
+        foreach (var s in _signposts) yield return (s.GlobalPosition, s.Text);
+    }
+
+    private async void TakeScreenshot()
+    {
+        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath("user://screenshots"));
+        var img = GetViewport().GetTexture().GetImage();
+        string path = $"user://screenshots/shot_{Time.GetTicksMsec()}.png";
+        img.SavePng(path);
+        Hud.ShowBanner($"Saved {path}", 2f);
     }
 
     /// <summary>Turn on the survival-style loop: blocks are gathered by breaking and
@@ -143,6 +271,9 @@ public partial class GameSession : Node3D
                 d.Inventory[BlockRegistry.Get(id).Name] = Inventory.Count(id);
         foreach (var (pos, id) in World.AllEdits())
             d.Edits.Add((pos.X, pos.Y, pos.Z, BlockRegistry.Get(id).Name));
+        foreach (var s in _signposts)
+            d.Signposts.Add((s.GlobalPosition, s.Text));
+        d.Waypoints.AddRange(_waypoints);
         return d;
     }
 
@@ -177,7 +308,28 @@ public partial class GameSession : Node3D
         if (Player == null) return;
         Hud.SetUnderwater(Player.HeadUnderwater);
 
-        bool busy = InDialogue || _crafting || (Pause?.IsPaused ?? false);
+        // Keep the compass pointing where the player faces (North = -Z).
+        Vector3 fwd = -Player.GlobalTransform.Basis.Z;
+        Hud.SetHeading(Mathf.RadToDeg(Mathf.Atan2(fwd.X, -fwd.Z)));
+
+        // Present mode: HUD is hidden; F2 grabs a screenshot, Esc returns.
+        if (_presentMode)
+        {
+            if (Input.IsActionJustPressed(GameInput.Actions.Screenshot)) TakeScreenshot();
+            if (Input.IsActionJustPressed(GameInput.Actions.Pause)) ExitPresentMode();
+            return;
+        }
+
+        bool busy = InDialogue || _crafting || _teacherOpen || (Pause?.IsPaused ?? false);
+
+        // F1 toggles the teacher panel (any mode, unless mid-dialogue/pause).
+        if (!InDialogue && !_crafting && !(Pause?.IsPaused ?? false)
+            && Input.IsActionJustPressed(GameInput.Actions.Teacher))
+        {
+            ToggleTeacher();
+            return;
+        }
+        if (_teacherOpen) return;
 
         // Tab toggles the crafting menu (survival sandbox only).
         if (Survival && !InDialogue && !(Pause?.IsPaused ?? false)
@@ -255,7 +407,8 @@ public partial class GameSession : Node3D
         if (Settings.CaptureMode == Settings.MouseCapture.ClickToCapture
             && e is InputEventMouseButton { Pressed: true }
             && Input.MouseMode != Input.MouseModeEnum.Captured
-            && !InDialogue && !_crafting && !(Pause?.IsPaused ?? false))
+            && !InDialogue && !_crafting && !_teacherOpen && !_presentMode
+            && !(Pause?.IsPaused ?? false))
         {
             Input.MouseMode = Input.MouseModeEnum.Captured;
             Player?.SuppressActionsFor(0.2f);

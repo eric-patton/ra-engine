@@ -16,6 +16,8 @@ public sealed class SaveData
     public float TimeOfDay = 0.4f;
     public readonly Dictionary<string, int> Inventory = new();
     public readonly List<(int x, int y, int z, string block)> Edits = new();
+    public readonly List<(Vector3 pos, string text)> Signposts = new();
+    public readonly List<(string name, Vector3 pos)> Waypoints = new();
 }
 
 /// <summary>Reads and writes <see cref="SaveData"/> to <c>user://saves/*.rsave</c>
@@ -50,6 +52,14 @@ public static class SaveSystem
         foreach (var (x, y, z, block) in d.Edits)
             edits.Add(new Godot.Collections.Array { x, y, z, block });
 
+        var signs = new Godot.Collections.Array();
+        foreach (var (pos, text) in d.Signposts)
+            signs.Add(new Godot.Collections.Array { pos, text });
+
+        var waypoints = new Godot.Collections.Array();
+        foreach (var (name, pos) in d.Waypoints)
+            waypoints.Add(new Godot.Collections.Array { name, pos });
+
         var dict = new Godot.Collections.Dictionary
         {
             { "version", Version },
@@ -60,6 +70,8 @@ public static class SaveSystem
             { "time", d.TimeOfDay },
             { "inventory", inv },
             { "edits", edits },
+            { "signposts", signs },
+            { "waypoints", waypoints },
         };
         f.StoreVar(dict);
         GD.Print($"[Save] wrote '{d.Name}' (seed {d.Seed}, {d.Edits.Count} edits)");
@@ -91,6 +103,18 @@ public static class SaveSystem
                 var a = e.AsGodotArray();
                 if (a.Count >= 4)
                     d.Edits.Add((a[0].AsInt32(), a[1].AsInt32(), a[2].AsInt32(), a[3].AsString()));
+            }
+        if (dict.TryGetValue("signposts", out var signsV))
+            foreach (var e in signsV.AsGodotArray())
+            {
+                var a = e.AsGodotArray();
+                if (a.Count >= 2) d.Signposts.Add((a[0].AsVector3(), a[1].AsString()));
+            }
+        if (dict.TryGetValue("waypoints", out var wpV))
+            foreach (var e in wpV.AsGodotArray())
+            {
+                var a = e.AsGodotArray();
+                if (a.Count >= 2) d.Waypoints.Add((a[0].AsString(), a[1].AsVector3()));
             }
         return d;
     }
