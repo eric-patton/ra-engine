@@ -62,6 +62,13 @@ public static class BlockRegistry
         Add("clay", "Clay").SetFaces("clay");
         Add("snow", "Snow").SetFaces("snow");
 
+        // underground ores & deposits (placed by the terrain generator at depth)
+        Add("coal_ore", "Coal Ore").SetFaces("coal_ore");
+        Add("copper_ore", "Copper Ore").SetFaces("copper_ore");
+        Add("iron_ore", "Iron Ore").SetFaces("iron_ore");
+        Add("gold_ore", "Gold Ore").SetFaces("gold_ore");
+        Add("bedrock", "Bedrock").SetFaces("bedrock");
+
         // water (liquid)
         var water = Add("water", "Water").SetFaces("water");
         water.Render = RenderType.Water;
@@ -97,6 +104,24 @@ public static class BlockRegistry
         fire.Hazard = true;
         fire.HazardDamage = 3f;
 
+        // Mining hardness (seconds to break by hand at base speed). Anything not
+        // listed keeps the BlockType default (0.6).
+        SetHard(0.5f, "grass", "dirt", "sand", "gravel", "snow", "clay");
+        SetHard(0.2f, "leaves", "olive_leaves");
+        SetHard(0.6f, "thatch", "lamp");
+        SetHard(1.6f, "stone", "cobblestone", "sandstone", "coal_ore");
+        SetHard(2.0f, "oak_log", "planks", "mud_brick", "stone_brick", "brick", "plaster",
+                       "cloth_red", "cloth_blue", "cloth_cream", "copper_ore");
+        SetHard(2.8f, "iron_ore", "gold_ore");
+        SetHard(3.0f, "gold_block", "bronze_block");
+        SetHard(6.0f, "bedrock");
+
         GD.Print($"[Blocks] Registered {ById.Count} block types.");
+    }
+
+    private static void SetHard(float seconds, params string[] names)
+    {
+        foreach (var n in names)
+            if (ByName.TryGetValue(n, out var b)) b.Hardness = seconds;
     }
 }

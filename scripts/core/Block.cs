@@ -29,6 +29,9 @@ public sealed class BlockType
     public bool Emissive = false;
     /// <summary>Grass tufts scatter on top of this block where the cell above is air.</summary>
     public bool SpawnsVegetation = false;
+    /// <summary>Seconds to mine this block by hand at base speed. 0 (or less) breaks
+    /// instantly; larger is tougher. Set per type in <see cref="BlockRegistry"/>.</summary>
+    public float Hardness = 0.6f;
 
     public bool IsAir => Render == RenderType.None;
     public bool IsLiquid => Render == RenderType.Water;

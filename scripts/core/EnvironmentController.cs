@@ -37,6 +37,7 @@ public sealed partial class EnvironmentController : Node3D
     public override void _Ready()
     {
         _skyMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://assets/shaders/sky.gdshader") };
+        _skyMat.SetShaderParameter("cloud_coverage", 0.5f);
         var sky = new Sky { SkyMaterial = _skyMat, ProcessMode = Sky.ProcessModeEnum.Incremental, RadianceSize = Sky.RadianceSizeEnum.Size128 };
 
         var env = new Godot.Environment
@@ -57,6 +58,10 @@ public sealed partial class EnvironmentController : Node3D
             FogEnabled = true,
             FogLightColor = HorizonDay,
             FogDensity = 0.0012f,
+            // Keep atmospheric fog on the terrain but DON'T fog the sky dome — at the
+            // default (1.0) depth fog washes the whole sky toward the fog colour,
+            // hiding the sun, moon, clouds and stars behind a flat wall of colour.
+            FogSkyAffect = 0f,
         };
         env.SetGlowLevel(2, 1f);
         env.SetGlowLevel(3, 1f);
@@ -124,6 +129,8 @@ public sealed partial class EnvironmentController : Node3D
         Weather = weather;
         if (_rain != null) _rain.Emitting = weather == Weather.Rain;
         if (_snow != null) _snow.Emitting = weather == Weather.Snow;
+        // Overcast the sky when it's precipitating; clear it otherwise.
+        _skyMat?.SetShaderParameter("cloud_coverage", weather == Weather.Clear ? 0.5f : 0.82f);
     }
 
     private void BuildWeather()
@@ -227,6 +234,7 @@ public sealed partial class EnvironmentController : Node3D
         _moon.Visible = moonFactor > 0.01f;
 
         _skyMat.SetShaderParameter("sun_dir", toSun);
+        _skyMat.SetShaderParameter("moon_dir", toMoon);
         _skyMat.SetShaderParameter("day", dayFactor);
 
         var env = _we.Environment;
@@ -244,6 +252,19 @@ public sealed partial class EnvironmentController : Node3D
         Vector3 x = up.Cross(z).Normalized();
         Vector3 y = z.Cross(x).Normalized();
         light.Basis = new Basis(x, y, z);
+    }
+
+    /// <summary>The current time of day as a friendly 12-hour clock string (e.g.
+    /// "6:30 AM"), for the HUD. TimeOfDay 0 = midnight, 0.5 = noon.</summary>
+    public string ClockText()
+    {
+        float total = Mathf.PosMod(TimeOfDay, 1f) * 24f;
+        int hh = (int)total;
+        int mm = (int)((total - hh) * 60f);
+        string ampm = hh < 12 ? "AM" : "PM";
+        int disp = hh % 12;
+        if (disp == 0) disp = 12;
+        return $"{disp}:{mm:00} {ampm}";
     }
 
     /// <summary>Convenience labels for lessons.</summary>

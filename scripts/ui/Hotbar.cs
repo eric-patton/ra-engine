@@ -12,6 +12,10 @@ namespace RAEngine.UI;
 /// it stays centred at any resolution.</summary>
 public partial class Hotbar : Control
 {
+    /// <summary>Fired whenever the selected block changes (number key, wheel, craft,
+    /// inventory refresh). Carries the new block id (0 when nothing is selected).</summary>
+    [Signal] public delegate void SelectionChangedEventHandler(int blockId);
+
     private const int Slots = 9;
     private const int SlotSize = 60;
     private const int Gap = 6;
@@ -173,6 +177,7 @@ public partial class Hotbar : Control
         if (count == 0)
         {
             if (_nameLabel != null) _nameLabel.Text = "";
+            EmitSignal(SignalName.SelectionChanged, 0); // nothing held
             return;
         }
         index = ((index % count) + count) % count;
@@ -180,6 +185,7 @@ public partial class Hotbar : Control
         _selected = index;
         if (_selected < Slots) _panels[_selected].AddThemeStyleboxOverride("panel", SlotStyle(true));
         _nameLabel.Text = BlockRegistry.Get(SelectedBlockId).DisplayName;
+        EmitSignal(SignalName.SelectionChanged, SelectedBlockId);
     }
 
     public void Next() => Select(_selected + 1);

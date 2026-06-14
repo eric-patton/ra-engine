@@ -124,6 +124,8 @@ public sealed partial class VoxelWorld : Node3D
         _genQueue.Clear();
         while (_genResults.TryDequeue(out _)) { }
         _edits.Clear();
+        _waterFill.Clear();
+        _waterQueued.Clear();
         _lastTargetChunk = new Vector3I(int.MinValue, 0, 0);
     }
 
@@ -305,4 +307,62 @@ public sealed partial class VoxelWorld : Node3D
         _genPending.Remove(coord);
         _dirty.Remove(coord);
     }
+
+    // ---- water fill -------------------------------------------------------
+    //
+    // A deterministic, frame-amortized flood fill: any air cell at or below sea
+    // level that touches water (above or to the side) becomes water, cascading into
+    // newly opened space. The fixed point depends only on the block grid + sea
+    // level (no RNG, no time), so it is safe to replicate to multiplayer clients by
+    // shipping the resulting block edits from an authoritative server. Bounded above
+    // by sea level and on the sides by solid walls, so a dig confines itself to the
+    // reachable air pocket below the waterline.
+
+    private readonly Queue<Vector3I> _waterFill = new();
+    private readonly HashSet<Vector3I> _waterQueued = new();
+    public int WaterFillPerFrame = 256;
+
+    private void EnqueueWaterArea(int x, int y, int z)
+    {
+        TryQueueWater(x, y, z);
+        TryQueueWater(x + 1, y, z);
+        TryQueueWater(x - 1, y, z);
+        TryQueueWater(x, y + 1, z);
+        TryQueueWater(x, y - 1, z);
+        TryQueueWater(x, y, z + 1);
+        TryQueueWater(x, y, z - 1);
+    }
+
+    private void TryQueueWater(int x, int y, int z)
+    {
+        if (y > TerrainGenerator.SeaLevel) return; // water never climbs above sea level
+        var p = new Vector3I(x, y, z);
+        if (_waterQueued.Add(p)) _waterFill.Enqueue(p);
+    }
+
+    private void PumpWaterFill()
+    {
+        int budget = WaterFillPerFrame;
+        while (budget-- > 0 && _waterFill.Count > 0)
+        {
+            var p = _waterFill.Dequeue();
+            _waterQueued.Remove(p);
+            if (p.Y > TerrainGenerator.SeaLevel) continue;
+            // Only act inside generated chunks, so the fill never conjures terrain
+            // into not-yet-streamed space; the front simply pauses at the boundary.
+            if (!_generated.Contains(ChunkCoord(p.X, p.Y, p.Z))) continue;
+            if (GetBlockId(p.X, p.Y, p.Z) != 0) continue; // only fill air
+            if (!WaterReaches(p)) continue;
+            // SetBlock records the edit (persistence), remeshes, and re-seeds the
+            // neighbours via the EnqueueWaterArea hook — that is the cascade.
+            SetBlock(p.X, p.Y, p.Z, _waterId);
+        }
+    }
+
+    private bool WaterReaches(Vector3I p) =>
+        GetBlockId(p.X, p.Y + 1, p.Z) == _waterId
+        || GetBlockId(p.X + 1, p.Y, p.Z) == _waterId
+        || GetBlockId(p.X - 1, p.Y, p.Z) == _waterId
+        || GetBlockId(p.X, p.Y, p.Z + 1) == _waterId
+        || GetBlockId(p.X, p.Y, p.Z - 1) == _waterId;
 }

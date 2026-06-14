@@ -75,6 +75,13 @@ public static class TextureForge
             new("snow",        s => Speckle(s, C("#f4f6fb"), C("#e4e9f4"), C("#ffffff"), grain:0.5f,  rough:0.6f,  roughVar:0.1f,  relief:0.2f,  seed:28)),
             new("water",       s => Water(s, seed: 29)),
 
+            // --- underground ores & deposits (stone-grey base + a vivid mineral fleck) ---
+            new("coal_ore",    s => Speckle(s, C("#7d7d82"), C("#54545a"), C("#16161a"), grain:0.55f, rough:0.9f,  roughVar:0.08f, relief:0.45f, seed:71)),
+            new("copper_ore",  s => Speckle(s, C("#8a8a8f"), C("#6f6f76"), C("#c47b3a"), grain:0.5f,  rough:0.85f, roughVar:0.1f,  relief:0.45f, seed:72)),
+            new("iron_ore",    s => Speckle(s, C("#8a8a8f"), C("#6f6f76"), C("#d8a07a"), grain:0.5f,  rough:0.85f, roughVar:0.1f,  relief:0.45f, seed:73)),
+            new("gold_ore",    s => Speckle(s, C("#8a8a8f"), C("#6f6f76"), C("#f3d24a"), grain:0.5f,  rough:0.8f,  roughVar:0.1f,  relief:0.45f, seed:74)),
+            new("bedrock",     s => Speckle(s, C("#3c3c40"), C("#2a2a2d"), C("#55555a"), grain:0.7f,  rough:0.95f, roughVar:0.05f, relief:0.5f,  seed:75)),
+
             // --- wood & plants ---
             new("log_side",    s => LogSide(s, seed: 31)),
             new("log_top",     s => LogTop(s, seed: 32)),

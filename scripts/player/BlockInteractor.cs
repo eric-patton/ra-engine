@@ -23,6 +23,17 @@ public partial class BlockInteractor : Node3D
     private float _breakTimer, _placeTimer;
     private const float RepeatDelay = 0.18f;
 
+    // Gradual mining: holding break chips away at the targeted block over a
+    // hardness-scaled time, with a progressive "cracks" overlay on the block.
+    private MeshInstance3D _crack;
+    private StandardMaterial3D _crackMat;
+    private ImageTexture[] _crackStages;
+    private Vector3I _miningCell;
+    private bool _mining;
+    private float _miningProgress; // 0..1
+    private int _crackStage = -1;
+    private float _hitSfx;
+
     /// <summary>The block currently under the crosshair (for the level editor).</summary>
     public VoxelRay.Hit CurrentTarget => _target;
 
@@ -37,6 +48,26 @@ public partial class BlockInteractor : Node3D
         };
         _highlight.Visible = false;
         AddChild(_highlight);
+
+        // Crack overlay: a slightly inflated, unshaded, transparent cube whose
+        // albedo is swapped through procedurally generated damage stages as mining
+        // progresses. Built once; the stage textures are generated on first use.
+        _crackMat = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Back,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+        };
+        _crack = new MeshInstance3D
+        {
+            Name = "Crack",
+            Mesh = new BoxMesh { Size = new Vector3(1.02f, 1.02f, 1.02f) },
+            MaterialOverride = _crackMat,
+            Visible = false,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        AddChild(_crack);
     }
 
     public override void _PhysicsProcess(double delta)
@@ -49,15 +80,132 @@ public partial class BlockInteractor : Node3D
         if (!CanEdit || !Player.InputEnabled || Player.ActionsSuppressed)
         {
             _breakTimer = _placeTimer = 0f;
+            ResetMining();
             return;
         }
 
-        // Break/place come from the mouse buttons WHILE the cursor is captured, or
-        // from the keyboard (+/- · ,/.) at any time — so keyboard-only play works.
+        // Break is a gradual hold (mining); place stays an instant, auto-repeating
+        // action. Both read the mouse button WHILE the cursor is captured, or the
+        // keyboard (+/- · ,/.) at any time — so keyboard-only play works.
         float dt = (float)delta;
         bool mouse = Input.MouseMode == Input.MouseModeEnum.Captured;
-        StepAction(mouse, GameInput.Actions.Primary, GameInput.Actions.KbBreak, ref _breakTimer, TryBreak, dt);
+        UpdateMining(mouse, dt);
         StepAction(mouse, GameInput.Actions.Secondary, GameInput.Actions.KbPlace, ref _placeTimer, TryPlace, dt);
+    }
+
+    /// <summary>Chip away at the targeted block while the break button is held. The
+    /// time to break scales with the block's <see cref="BlockType.Hardness"/>;
+    /// changing target, releasing, or looking away resets progress.</summary>
+    private void UpdateMining(bool mouse, float dt)
+    {
+        bool held = (mouse && Input.IsActionPressed(GameInput.Actions.Primary))
+                    || Input.IsActionPressed(GameInput.Actions.KbBreak);
+
+        if (!held || !_target.Ok) { ResetMining(); return; }
+
+        // (Re)start when we begin holding or the target moves to a new block.
+        if (!_mining || _target.Block != _miningCell)
+        {
+            _mining = true;
+            _miningCell = _target.Block;
+            _miningProgress = 0f;
+            _hitSfx = 0f;
+        }
+
+        var b = World.GetBlock(_miningCell);
+        if (b.IsAir) { ResetMining(); return; }
+
+        if (b.Hardness <= 0f) { BreakAt(_miningCell); ResetMining(); return; } // instant
+
+        _miningProgress += dt / b.Hardness;
+
+        // Periodic soft "tap" while mining (quiet, throttled).
+        _hitSfx -= dt;
+        if (_hitSfx <= 0f) { AudioManager.Play("step", 0.7f, -7f); _hitSfx = 0.26f; }
+
+        if (_miningProgress >= 1f)
+        {
+            BreakAt(_miningCell);
+            // Released-and-held chain mining: clear progress so the next block
+            // (re-acquired next frame) starts from zero rather than insta-breaking.
+            _mining = false;
+            _miningProgress = 0f;
+        }
+        UpdateCrackVisual();
+    }
+
+    private void ResetMining()
+    {
+        if (!_mining && _miningProgress == 0f && (_crack == null || !_crack.Visible)) return;
+        _mining = false;
+        _miningProgress = 0f;
+        _crackStage = -1;
+        if (_crack != null) _crack.Visible = false;
+    }
+
+    private void UpdateCrackVisual()
+    {
+        if (_crack == null) return;
+        if (!_mining || _miningProgress <= 0f) { _crack.Visible = false; return; }
+        EnsureCrackStages();
+        int stage = Mathf.Clamp((int)(_miningProgress * _crackStages.Length), 0, _crackStages.Length - 1);
+        if (stage != _crackStage)
+        {
+            _crackStage = stage;
+            _crackMat.AlbedoTexture = _crackStages[stage];
+        }
+        _crack.GlobalPosition = (Vector3)_miningCell + new Vector3(0.5f, 0.5f, 0.5f);
+        _crack.Visible = true;
+    }
+
+    /// <summary>Generate the 8 cumulative crack-damage stages once. Each stage draws
+    /// the previous cracks plus a couple more jagged lines radiating from the centre,
+    /// onto a transparent texture so only the dark cracks show over the block.</summary>
+    private void EnsureCrackStages()
+    {
+        if (_crackStages != null) return;
+        const int n = 8, s = 64;
+        _crackStages = new ImageTexture[n];
+        for (int stage = 0; stage < n; stage++)
+        {
+            var img = Image.CreateEmpty(s, s, false, Image.Format.Rgba8);
+            img.Fill(new Color(0, 0, 0, 0));
+            int cracks = 2 + stage * 2; // cumulative: crack c is deterministic in c
+            for (int c = 0; c < cracks; c++)
+            {
+                uint h = ValueNoise2D.Hash(c, 7, 1234);
+                float ang = (h % 360u) * Mathf.Pi / 180f;
+                float len = s * (0.28f + ((h >> 9) % 100u) / 100f * 0.22f);
+                DrawCrack(img, s / 2f, s / 2f, ang, len, h);
+            }
+            img.GenerateMipmaps();
+            _crackStages[stage] = ImageTexture.CreateFromImage(img);
+        }
+    }
+
+    private static void DrawCrack(Image img, float x, float y, float ang, float len, uint seed)
+    {
+        int s = img.GetWidth();
+        int steps = (int)len;
+        for (int i = 0; i < steps; i++)
+        {
+            uint hh = ValueNoise2D.Hash((int)(seed & 0xFFFF), i, 99);
+            float jitter = ((hh % 100u) / 100f - 0.5f) * 0.7f; // jagged wander
+            float a = ang + jitter;
+            x += Mathf.Cos(a);
+            y += Mathf.Sin(a);
+            if (x < 1 || y < 1 || x > s - 2 || y > s - 2) break;
+            PlotDark(img, (int)x, (int)y, 0.85f);
+            PlotDark(img, (int)x + 1, (int)y, 0.4f);
+            PlotDark(img, (int)x, (int)y + 1, 0.4f);
+        }
+    }
+
+    private static void PlotDark(Image img, int x, int y, float a)
+    {
+        if (x < 0 || y < 0 || x >= img.GetWidth() || y >= img.GetHeight()) return;
+        float na = Mathf.Max(img.GetPixel(x, y).A, a);
+        img.SetPixel(x, y, new Color(0.04f, 0.03f, 0.02f, na));
     }
 
     // Fire once on press, then auto-repeat while held. Break and place use

@@ -229,10 +229,12 @@ public partial class Player : CharacterBody3D, IDamageable
         vel = vel.MoveToward(target, Accel * dt * SwimSpeed);
         if (Mathf.IsZeroApprox(vy))
         {
-            // Rise while submerged, settle gently once the head breaches the
-            // surface, so an idle swimmer bobs at the waterline and can breathe.
-            float buoy = HeadUnderwater ? 2.0f : -0.4f;
-            vel.Y = Mathf.MoveToward(vel.Y, buoy, Gravity * 0.35f * dt);
+            // Neutral buoyancy while fully submerged, so you can dive (Crouch), rise
+            // (Jump) and hover to swim around and explore underwater rather than being
+            // shoved back to the surface; once the head breaches, settle gently at the
+            // waterline so an idle swimmer bobs there and can breathe.
+            float targetY = HeadUnderwater ? 0f : -0.4f;
+            vel.Y = Mathf.MoveToward(vel.Y, targetY, Gravity * 0.4f * dt);
         }
 
         // Let the player climb out onto a bank that's level with the surface.

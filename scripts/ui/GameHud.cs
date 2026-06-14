@@ -31,6 +31,36 @@ public partial class GameHud : CanvasLayer
         BuildMouseHint();
         BuildObjectives();
         BuildCompass();
+        BuildClock();
+    }
+
+    // ---- clock ------------------------------------------------------------
+
+    private Label _clock;
+
+    private void BuildClock()
+    {
+        _clock = new Label { Name = "Clock", Text = "", HorizontalAlignment = HorizontalAlignment.Center };
+        _clock.AddThemeFontSizeOverride("font_size", 20);
+        _clock.AddThemeColorOverride("font_color", new Color(1f, 0.95f, 0.72f));
+        _clock.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _clock.AddThemeConstantOverride("outline_size", 4);
+        _clock.MouseFilter = Control.MouseFilterEnum.Ignore;
+        AddChild(_clock);
+        GetViewport().SizeChanged += RelayoutClock;
+        RelayoutClock();
+    }
+
+    private void RelayoutClock()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        _clock.Size = new Vector2(vp.X, 26);
+        _clock.Position = new Vector2(0, 60); // centred, just below the compass strip
+    }
+
+    public void SetClock(string text)
+    {
+        if (_clock != null && _clock.Text != text) _clock.Text = text;
     }
 
     // ---- compass ----------------------------------------------------------
@@ -364,6 +394,7 @@ public partial class GameHud : CanvasLayer
         vp.SizeChanged -= RelayoutObjectives;
         vp.SizeChanged -= RelayoutBanner;
         vp.SizeChanged -= RelayoutMouseHint;
+        vp.SizeChanged -= RelayoutClock;
     }
 
     private void RelayoutBanner()

@@ -23,6 +23,7 @@ public partial class GameSession : Node3D
     public BlockInteractor Interactor { get; private set; }
     public BuildEditor Editor { get; private set; }
     public WeaponController Weapons { get; private set; }
+    private HeldItem _held;
     public DialogueBox Dialogue { get; private set; }
     public Narrator Narrator { get; private set; }
     public PauseMenu Pause { get; private set; }
@@ -86,6 +87,13 @@ public partial class GameSession : Node3D
         Weapons.AttachViewmodel();
         Weapons.Equip(Weapon.Sling());
         Weapons.WeaponChanged += Hud.SetWeapon;
+
+        // First-person "held block": shows the selected hotbar block in hand.
+        _held = new HeldItem { Name = "HeldItem", Player = Player, World = World };
+        Player.AddChild(_held);
+        _held.AttachViewmodel();
+        Hud.Hotbar.SelectionChanged += _held.OnSelectionChanged;
+        _held.OnSelectionChanged(Hud.Hotbar.SelectedBlockId);
 
         Narrator = new Narrator { Name = "Narrator" };
         AddChild(Narrator);
@@ -312,6 +320,9 @@ public partial class GameSession : Node3D
         Vector3 fwd = -Player.GlobalTransform.Basis.Z;
         Hud.SetHeading(Mathf.RadToDeg(Mathf.Atan2(fwd.X, -fwd.Z)));
 
+        // HUD clock follows the time of day.
+        if (Env != null) Hud.SetClock(Env.ClockText());
+
         // Present mode: HUD is hidden; F2 grabs a screenshot, Esc returns.
         if (_presentMode)
         {
@@ -460,6 +471,7 @@ public partial class GameSession : Node3D
         Interactor.CanEdit = build;
         Editor.SetEnabled(build);
         Weapons.SetEnabled(!build);
+        _held?.SetShown(build);
         Hud.SetHotbarVisible(build);
         Hud.SetWeaponVisible(!build);
         Hud.SetWeapon(Weapons.Current?.Name ?? "");

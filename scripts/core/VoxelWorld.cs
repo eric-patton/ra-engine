@@ -19,6 +19,7 @@ public sealed partial class VoxelWorld : Node3D
 {
     public BlockTextures Textures { get; private set; }
     public Material WaterMaterial { get; private set; }
+    private ushort _waterId;
 
     private readonly Dictionary<Vector3I, Chunk> _chunks = new();
     private readonly HashSet<Vector3I> _dirty = new();
@@ -46,6 +47,7 @@ public sealed partial class VoxelWorld : Node3D
         BlockRegistry.EnsureInit();
         Textures = BlockTextures.Build();
         WaterMaterial = MakeWaterMaterial();
+        _waterId = BlockRegistry.IdOf("water");
     }
 
     public override void _Process(double delta)
@@ -54,6 +56,7 @@ public sealed partial class VoxelWorld : Node3D
         {
             UpdateStreaming();
             PumpGeneration();
+            PumpWaterFill();
         }
         PumpMeshing();
     }
@@ -142,6 +145,10 @@ public sealed partial class VoxelWorld : Node3D
         var ch = GetOrCreate(c);
         int lx = Mod(x, Chunk.Size), ly = Mod(y, Chunk.Size), lz = Mod(z, Chunk.Size);
         ch.SetLocal(lx, ly, lz, id);
+        // Let water reclaim any space opened at/below sea level near it (and cascade
+        // as new water cells appear). Seeding the edited cell + its 6 neighbours
+        // covers both "dug a hole next to water" and "removed a wall holding it back".
+        if (_streaming) EnqueueWaterArea(x, y, z);
         if (!remesh) return;
 
         MarkDirty(c);

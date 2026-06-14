@@ -73,11 +73,29 @@ public partial class Game : Node3D
             case "--test-biomes":
                 RunBiomeTest();
                 break;
+            case "--test-underground":
+                RunUndergroundTest();
+                break;
             case "--test-daynight":
                 RunDayNightTest();
                 break;
             case "--test-sky":
                 RunSkyTest();
+                break;
+            case "--test-water":
+                RunWaterTest();
+                break;
+            case "--test-mining":
+                RunMiningTest();
+                break;
+            case "--test-strata":
+                RunStrataTest();
+                break;
+            case "--test-waterfill":
+                RunWaterFillTest();
+                break;
+            case "--test-swim":
+                RunSwimTest();
                 break;
             case "--test-craft":
                 RunCraftTest();
@@ -691,13 +709,18 @@ public partial class Game : Node3D
         Input.ActionRelease(Core.GameInput.Actions.KbPlace);
         bool placed = tgt.Ok && session.World.GetBlockId(placeCell) != 0;
 
-        // keyboard BREAK -> removes whatever is now under the crosshair
+        // keyboard BREAK -> gradual mining: hold the key until the block is chipped
+        // away (no longer an instant one-frame break).
         await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
         Vector3I breakCell = session.Interactor.CurrentTarget.Block;
         Input.ActionPress(Core.GameInput.Actions.KbBreak);
-        await ToSignal(GetTree().CreateTimer(0.12), SceneTreeTimer.SignalName.Timeout);
+        bool broke = false;
+        for (int i = 0; i < 40 && !broke; i++)
+        {
+            await ToSignal(GetTree().CreateTimer(0.1), SceneTreeTimer.SignalName.Timeout);
+            if (session.World.GetBlockId(breakCell) == 0) broke = true;
+        }
         Input.ActionRelease(Core.GameInput.Actions.KbBreak);
-        bool broke = session.World.GetBlockId(breakCell) == 0;
 
         // keyboard LOOK: arrows/numpad turn the body (yaw) and head (pitch)
         float yaw0 = session.Player.Rotation.Y, pitch0 = session.Player.Head.Rotation.X;
@@ -845,6 +868,188 @@ public partial class Game : Node3D
         QuitSoon();
     }
 
+    /// <summary>Water-fill test: in a streamed world, a single water source dropped
+    /// into an enclosed below-sea-level basin should flood the whole interior up to
+    /// sea level (and never rise above it).</summary>
+    private async void RunWaterFillTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        var gen = new Core.TerrainGenerator(2024);
+        var target = new Node3D { Name = "T" };
+        AddChild(target);
+        target.GlobalPosition = new Vector3(8, 40, 8);
+        world.StartStreaming(gen, target, 3, -1, 3);
+        world.EnsureSpawnArea(new Vector3(8, 0, 8), 2);
+        await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
+
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        ushort water = Core.BlockRegistry.IdOf("water");
+        int sea = Core.TerrainGenerator.SeaLevel; // 26
+        const int x0 = 6, x1 = 10, z0 = 6, z1 = 10;
+        for (int x = x0; x <= x1; x++)
+        for (int z = z0; z <= z1; z++)
+        {
+            world.SetBlock(x, 23, z, stone);          // floor
+            for (int y = 24; y <= 27; y++)
+            {
+                bool wall = x == x0 || x == x1 || z == z0 || z == z1;
+                world.SetBlock(x, y, z, wall ? stone : (ushort)0); // walls solid, interior air
+            }
+        }
+        world.SetBlock(7, sea, 7, water);             // one source drop in a corner
+
+        await ToSignal(GetTree().CreateTimer(1.2), SceneTreeTimer.SignalName.Timeout); // let it flood
+
+        int filled = 0, interior = 0;
+        for (int x = 7; x <= 9; x++)
+        for (int z = 7; z <= 9; z++)
+        for (int y = 24; y <= sea; y++)
+        {
+            interior++;
+            if (world.GetBlockId(x, y, z) == water) filled++;
+        }
+        bool noLeak = world.GetBlockId(8, sea + 1, 8) != water;
+        GD.Print($"[RA] waterfill-test: interior={interior} filled={filled} " +
+                 $"allFilled={filled == interior} noLeakAboveSea={noLeak}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Swim test: fully submerged, the player should hover (neutral buoyancy),
+    /// dive while crouch is held, and rise while jump is held.</summary>
+    private async void RunSwimTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        ushort water = Core.BlockRegistry.IdOf("water");
+        for (int x = 4; x <= 10; x++)
+        for (int z = 4; z <= 10; z++)
+        for (int y = -11; y <= 1; y++)
+            world.SetBlock(x, y, z, stone, false);
+        for (int x = 5; x <= 9; x++)
+        for (int z = 5; z <= 9; z++)
+        for (int y = -10; y <= 0; y++)
+            world.SetBlock(x, y, z, water, false);
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+
+        var player = new PlayerSys.Player { Name = "Player", World = world, InputEnabled = true };
+        AddChild(player);
+        player.GlobalPosition = new Vector3(7, -1, 7); // submerged
+        player.Camera.Current = true;
+        await ToSignal(GetTree().CreateTimer(0.8), SceneTreeTimer.SignalName.Timeout);
+        bool inWater = player.InWater, headUnder = player.HeadUnderwater;
+        float yStart = player.GlobalPosition.Y;
+
+        Input.ActionPress(Core.GameInput.Actions.Crouch);
+        await ToSignal(GetTree().CreateTimer(0.9), SceneTreeTimer.SignalName.Timeout);
+        float yDive = player.GlobalPosition.Y;
+        Input.ActionRelease(Core.GameInput.Actions.Crouch);
+
+        Input.ActionPress(Core.GameInput.Actions.Jump);
+        await ToSignal(GetTree().CreateTimer(0.9), SceneTreeTimer.SignalName.Timeout);
+        float yRise = player.GlobalPosition.Y;
+        Input.ActionRelease(Core.GameInput.Actions.Jump);
+
+        bool dived = yDive < yStart - 0.5f;
+        bool rose = yRise > yDive + 0.5f;
+        GD.Print($"[RA] swim-test: inWater={inWater} headUnder={headUnder} " +
+                 $"yStart={yStart:F1} yDive={yDive:F1} yRise={yRise:F1} dived={dived} rose={rose}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Mining test: hold the break action on a stone block and screenshot
+    /// mid-mine, so the progressive crack overlay is visible (stone's 1.6s hardness
+    /// gives a wide window to catch a mid-stage crack).</summary>
+    private async void RunMiningTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 24), creative: true, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        for (int y = 1; y <= 3; y++)
+            session.World.SetBlock(24, y, 20, Core.BlockRegistry.IdOf("stone"), false);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+        session.Player.Head.Rotation = new Vector3(-0.12f, 0, 0); // look at the pillar
+
+        await ToSignal(GetTree().CreateTimer(0.5), SceneTreeTimer.SignalName.Timeout);
+        // Hold the keyboard break action (works without a captured mouse) to mine.
+        Input.ActionPress(Core.GameInput.Actions.KbBreak);
+        await ToSignal(GetTree().CreateTimer(0.95), SceneTreeTimer.SignalName.Timeout); // ~60% into a 1.6s mine
+        await Capture("res://_mining.png", 0.0);
+        Input.ActionRelease(Core.GameInput.Actions.KbBreak);
+        GD.Print("[RA] mining-test: captured mid-mine");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Strata test: generate real terrain, carve away one half to expose a
+    /// vertical cross-section, and screenshot it so the underground layering — top
+    /// soil, stone, ore deposits, cave air and the bedrock floor — is visible.</summary>
+    private async void RunStrataTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        var gen = new Core.TerrainGenerator(1337);
+        var buf = new ushort[Core.Chunk.Volume];
+        for (int cx = 0; cx < 3; cx++)
+        for (int cy = -1; cy <= 3; cy++)
+        for (int cz = 0; cz < 3; cz++)
+        {
+            gen.Generate(new Vector3I(cx, cy, cz), buf);
+            world.LoadChunk(new Vector3I(cx, cy, cz), buf);
+        }
+        world.RebuildAllNow();
+
+        // Carve away the +X half to reveal the cross-section face at x = 24.
+        for (int x = 24; x < 48; x++)
+        for (int y = -16; y < 48; y++)
+        for (int z = 0; z < 48; z++)
+            world.SetBlock(x, y, z, 0, false);
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+
+        var cam = new Camera3D { Name = "Cam", Fov = 60f };
+        AddChild(cam);
+        cam.Current = true;
+        cam.Position = new Vector3(31, 9, 24);                 // close to the x=24 cut face
+        cam.LookAt(new Vector3(23, 5, 24), Vector3.Up);
+        await Capture("res://_strata.png", 0.8);
+        GD.Print("[RA] strata-test: captured cross-section");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Water-seam test: a wide, multi-chunk sheet of water (so the greedy
+    /// mesher produces big merged top quads and chunk-border edges — the exact case
+    /// that used to show a faint grid) viewed at a grazing angle, screenshotted for
+    /// a visual check that the per-pixel wave normal removed the seams.</summary>
+    private async void RunWaterTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 6, 44), creative: true, captureMouse: false);
+        ushort sand = Core.BlockRegistry.IdOf("sand");
+        ushort water = Core.BlockRegistry.IdOf("water");
+        for (int x = -8; x <= 56; x++)
+        for (int z = -8; z <= 56; z++)
+        {
+            session.World.SetBlock(x, -2, z, sand, false);
+            session.World.SetBlock(x, -1, z, water, false);
+            session.World.SetBlock(x, 0, z, water, false);
+        }
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+        session.Player.Head.Rotation = new Vector3(-0.16f, 0, 0); // grazing look across the water
+        await Capture("res://_water.png", 0.8);
+        GetTree().Quit(0);
+    }
+
     /// <summary>Phase-5 sky render test: screenshot the world at noon, dusk and night
     /// to eyeball the sky shader (sun, clouds, stars) and the lighting swing.</summary>
     private async void RunSkyTest()
@@ -857,14 +1062,23 @@ public partial class Game : Node3D
             Core.WorldGen.Tree(session.World, new Vector3I(12 + i * 6, 1, 30));
         session.World.MarkAllDirty();
         session.World.RebuildAllNow();
-        session.Player.Head.Rotation = new Vector3(-0.05f, 0, 0);
+        // SUN: mid-morning, face north (-Z, where the sun sits) and pitch up to it.
+        session.Player.Rotation = new Vector3(0, 0, 0);
+        session.Player.Head.Rotation = new Vector3(0.55f, 0, 0);
+        session.Env.SetFixedTime(Core.EnvironmentController.Morning);
+        await Capture("res://_sky_sun.png", 0.6);
 
+        // CLOUDS: noon, look high up.
+        session.Player.Head.Rotation = new Vector3(0.95f, 0, 0);
         session.Env.SetFixedTime(Core.EnvironmentController.Noon);
-        await Capture("res://_sky_noon.png", 0.6);
-        session.Env.SetFixedTime(Core.EnvironmentController.Dusk);
-        await Capture("res://_sky_dusk.png", 0.6);
-        session.Env.SetFixedTime(Core.EnvironmentController.Night);
-        await Capture("res://_sky_night.png", 0.6);
+        await Capture("res://_sky_clouds.png", 0.6);
+
+        // MOON: pre-dawn, face south (+Z, where the moon sits) and pitch up to it.
+        session.Player.Rotation = new Vector3(0, Mathf.Pi, 0);
+        session.Player.Head.Rotation = new Vector3(0.55f, 0, 0);
+        session.Env.SetFixedTime(0.85f);
+        await Capture("res://_sky_moon.png", 0.6);
+
         GD.Print("[RA] sky-test: done");
         GetTree().Quit(0);
     }
@@ -903,6 +1117,49 @@ public partial class Game : Node3D
         var summary = new System.Text.StringBuilder();
         foreach (var kv in counts) summary.Append($"{kv.Key}:{kv.Value} ");
         GD.Print($"[RA] biome-test: distinct={counts.Count} logs={logCount} leaves={leafCount} | {summary}");
+        QuitSoon();
+    }
+
+    /// <summary>Underground test: below the surface the world should be layered —
+    /// a bedrock floor at the bottom, mostly stone, scattered ore deposits and some
+    /// carved cave air — and the new 3D noise must be deterministic.</summary>
+    private void RunUndergroundTest()
+    {
+        var gen = new Core.TerrainGenerator(1337);
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        ushort bedrock = Core.BlockRegistry.IdOf("bedrock");
+        ushort coal = Core.BlockRegistry.IdOf("coal_ore");
+        ushort copper = Core.BlockRegistry.IdOf("copper_ore");
+        ushort iron = Core.BlockRegistry.IdOf("iron_ore");
+        ushort gold = Core.BlockRegistry.IdOf("gold_ore");
+
+        int stoneN = 0, bedrockN = 0, oreN = 0, caveN = 0, bottomCells = 0, bottomBedrock = 0;
+        var buf = new ushort[Core.Chunk.Volume];
+        for (int cx = 0; cx < 16; cx++)
+        for (int cz = 0; cz < 3; cz++)
+        for (int cy = -1; cy <= 3; cy++)
+        {
+            gen.Generate(new Vector3I(cx, cy, cz), buf);
+            for (int ly = 0; ly < Core.Chunk.Size; ly++)
+            for (int lz = 0; lz < Core.Chunk.Size; lz++)
+            for (int lx = 0; lx < Core.Chunk.Size; lx++)
+            {
+                ushort id = buf[Core.Chunk.Index(lx, ly, lz)];
+                int wy = cy * Core.Chunk.Size + ly;
+                if (id == stone) stoneN++;
+                else if (id == bedrock) bedrockN++;
+                else if (id == coal || id == copper || id == iron || id == gold) oreN++;
+                else if (id == 0 && wy >= -13 && wy <= 8) caveN++; // air this deep == a cave
+                if (wy == -16) { bottomCells++; if (id == bedrock) bottomBedrock++; }
+            }
+        }
+
+        var n = new Core.ValueNoise2D(99);
+        bool det = Mathf.IsEqualApprox(n.Noise3(1.5f, 2.5f, 3.5f), n.Noise3(1.5f, 2.5f, 3.5f))
+            && n.Fractal3(4f, 5f, 6f, 3) >= 0f && n.Fractal3(4f, 5f, 6f, 3) <= 1f;
+
+        GD.Print($"[RA] underground-test: stone={stoneN} ores={oreN} bedrock={bedrockN} caves={caveN} " +
+                 $"bottomAllBedrock={bottomBedrock == bottomCells && bottomCells > 0} noise3Det={det}");
         QuitSoon();
     }
 
