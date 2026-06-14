@@ -188,6 +188,12 @@ public partial class Game : Node3D
         world.StartStreaming(gen, _session.Player, renderDistance: 6, minChunkY: -1, maxChunkY: 3);
         world.EnsureSpawnArea(spawn, radius: 2); // immediate ground under the player
 
+        _session.Env.SetWeatherFollow(_session.Player);
+        _session.AddChild(new Core.WeatherDirector
+        {
+            Name = "Weather", Generator = gen, Player = _session.Player, Env = _session.Env,
+        });
+
         _session.Hud.ShowBanner("Sandbox — endless world!  (WASD move · arrows/numpad or mouse look · +/- place/break · G fly · B mode)", 6f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();

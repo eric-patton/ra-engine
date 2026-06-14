@@ -41,6 +41,7 @@ public static class ChunkMesher
         public readonly Surface Opaque = new();
         public readonly Surface Water = new();
         public readonly List<Vector3> Collision = new();
+        public readonly List<Vector3I> Vegetation = new(); // grass cells to scatter tufts on
         public bool IsEmpty => Opaque.Count == 0 && Water.Count == 0 && Collision.Count == 0;
         public int VertexCount => Opaque.Count + Water.Count;
     }
@@ -207,7 +208,28 @@ public static class ChunkMesher
                 }
             }
         }
+
+        ScatterVegetation(snap, md);
         return md;
+    }
+
+    /// <summary>Mark grass cells (with air above) that should grow a tuft. Roughly a
+    /// third of eligible cells, chosen by a hash of the world position so the
+    /// scatter is deterministic and identical across runs and machines.</summary>
+    private static void ScatterVegetation(Snapshot snap, MeshData md)
+    {
+        Vector3I baseW = snap.Coord * Chunk.Size;
+        for (int y = 0; y < Chunk.Size; y++)
+        for (int z = 0; z < Chunk.Size; z++)
+        for (int x = 0; x < Chunk.Size; x++)
+        {
+            ushort id = snap.Get(x, y, z);
+            if (id == 0 || !BlockRegistry.Get(id).SpawnsVegetation) continue;
+            if (snap.Get(x, y + 1, z) != 0) continue; // needs open air above
+            uint h = ValueNoise2D.Hash(baseW.X + x, baseW.Z + z, 7777);
+            if ((h & 0xFFFF) / 65535f > 0.32f) continue;
+            md.Vegetation.Add(new Vector3I(x, y, z));
+        }
     }
 
     private static bool Mergeable(int m, bool[] has, bool[] used, int[] aoFlat,
@@ -293,6 +315,41 @@ public static class ChunkMesher
             col = shape;
         }
         chunk.ApplyMesh(opaque, world.Textures.Material, water, world.WaterMaterial, col);
+        chunk.SetVegetation(BuildVegetation(chunk.Coord, md));
+    }
+
+    /// <summary>Build a per-chunk MultiMesh of grass tufts. Each instance's yaw,
+    /// scale and jitter come from a hash of its world cell, so the scatter is
+    /// stable. Returns null when the chunk has no vegetation.</summary>
+    private static MultiMeshInstance3D BuildVegetation(Vector3I coord, MeshData md)
+    {
+        if (md.Vegetation.Count == 0) return null;
+        Vector3I baseW = coord * Chunk.Size;
+        var mm = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            Mesh = Vegetation.CrossMesh,
+            InstanceCount = md.Vegetation.Count,
+        };
+        for (int i = 0; i < md.Vegetation.Count; i++)
+        {
+            Vector3I c = md.Vegetation[i];
+            uint h = ValueNoise2D.Hash(baseW.X + c.X, baseW.Z + c.Z, 31337);
+            float yaw = (h & 0xFF) / 255f * Mathf.Tau;
+            float scale = 0.8f + ((h >> 8) & 0xFF) / 255f * 0.5f;
+            float jx = (((h >> 16) & 0xFF) / 255f - 0.5f) * 0.5f;
+            float jz = (((h >> 24) & 0xFF) / 255f - 0.5f) * 0.5f;
+            var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(scale, scale, scale));
+            var origin = new Vector3(c.X + 0.5f + jx, c.Y + 1f, c.Z + 0.5f + jz);
+            mm.SetInstanceTransform(i, new Transform3D(basis, origin));
+        }
+        return new MultiMeshInstance3D
+        {
+            Name = "Vegetation",
+            Multimesh = mm,
+            MaterialOverride = Vegetation.Material,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
     }
 
     /// <summary>Replay one surface's pre-computed vertex data through a SurfaceTool

@@ -51,7 +51,8 @@ public static class BlockRegistry
         Air = air;
 
         // natural terrain
-        Add("grass", "Grass").SetFaces(top: "grass_top", bottom: "dirt", side: "grass_side");
+        Add("grass", "Grass").SetFaces(top: "grass_top", bottom: "dirt", side: "grass_side")
+            .SpawnsVegetation = true;
         Add("dirt", "Dirt").SetFaces("dirt");
         Add("stone", "Stone").SetFaces("stone");
         Add("cobblestone", "Cobblestone").SetFaces("cobblestone");

@@ -26,6 +26,7 @@ public sealed partial class Chunk : Node3D
     private MeshInstance3D _opaque;
     private MeshInstance3D _water;
     private CollisionShape3D _col;
+    private MultiMeshInstance3D _veg;
 
     public static int Index(int x, int y, int z) => (y * Size + z) * Size + x;
     public static bool InBounds(int x, int y, int z) =>
@@ -75,6 +76,14 @@ public sealed partial class Chunk : Node3D
         _col.Shape = collision;
         _col.Disabled = collision == null;
         Meshed = true;
+    }
+
+    /// <summary>Replace this chunk's grass-tuft MultiMesh (freeing any previous one).
+    /// Passing null clears it. Built fresh on every remesh.</summary>
+    public void SetVegetation(MultiMeshInstance3D veg)
+    {
+        if (_veg != null) { _veg.QueueFree(); _veg = null; }
+        if (veg != null) { _veg = veg; AddChild(veg); }
     }
 
     /// <summary>True when this chunk has solid collision geometry the player can

@@ -27,6 +27,8 @@ public sealed class BlockType
     public bool Hazard = false;
     public float HazardDamage = 0f;
     public bool Emissive = false;
+    /// <summary>Grass tufts scatter on top of this block where the cell above is air.</summary>
+    public bool SpawnsVegetation = false;
 
     public bool IsAir => Render == RenderType.None;
     public bool IsLiquid => Render == RenderType.Water;
