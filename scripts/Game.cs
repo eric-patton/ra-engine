@@ -199,6 +199,8 @@ public partial class Game : Node3D
         _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
         AddChild(_session);
         _session.Setup(lesson.Spawn, creative: false);
+        if (lesson.TimeOfDay is float tod) _session.Env.SetFixedTime(tod);
+        else _session.Env.SetCycle(true);
         lesson.Build(_session);
         _session.Hud.ShowBanner($"{lesson.Title}", 4f);
         Core.AudioManager.StartMusic();

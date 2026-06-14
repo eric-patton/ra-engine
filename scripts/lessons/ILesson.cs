@@ -13,6 +13,10 @@ public interface ILesson
     string Subtitle { get; }
     Vector3 Spawn { get; }
     void Build(GameSession session);
+
+    /// <summary>The time of day to pin this lesson to (0..1), or null to let the
+    /// day/night cycle run. Default: a bright mid-morning.</summary>
+    float? TimeOfDay => Core.EnvironmentController.Morning;
 }
 
 /// <summary>Catalogue of available lessons (used by the menu and CLI).</summary>

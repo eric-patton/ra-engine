@@ -16,6 +16,7 @@ public sealed class CreationGarden : ILesson
     public string Title => "The Garden of Eden";
     public string Subtitle => "Creation — Genesis 1–2";
     public Vector3 Spawn => new(32, 3, 52);
+    public float? TimeOfDay => Core.EnvironmentController.Dawn; // the freshness of a new creation
 
     private GameSession _s;
     private int _named;

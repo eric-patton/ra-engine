@@ -215,18 +215,22 @@ public sealed partial class VoxelWorld : Node3D
         ResetStreaming();
     }
 
-    // ---- water material (placeholder; upgraded with the swimming milestone) -
+    // ---- water material (animated rippling shader) ------------------------
 
     private static Material MakeWaterMaterial()
     {
-        var m = new StandardMaterial3D
+        var shader = GD.Load<Shader>("res://assets/shaders/water.gdshader");
+        if (shader == null)
         {
-            AlbedoColor = new Color(0.18f, 0.42f, 0.62f, 0.72f),
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            Roughness = 0.12f,
-            Metallic = 0.0f,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
-        return m;
+            // Fallback: flat translucent water if the shader is missing.
+            return new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.18f, 0.42f, 0.62f, 0.72f),
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                Roughness = 0.12f,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            };
+        }
+        return new ShaderMaterial { Shader = shader };
     }
 }
