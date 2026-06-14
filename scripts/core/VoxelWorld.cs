@@ -1,11 +1,20 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Godot;
 
 namespace RAEngine.Core;
 
 /// <summary>The voxel world: a sparse grid of <see cref="Chunk"/>s with block
-/// get/set in world coordinates, neighbour-aware remeshing, and collision.</summary>
+/// get/set in world coordinates, neighbour-aware remeshing, and collision.
+///
+/// Meshing is asynchronous: dirty chunks are snapshotted on the main thread and
+/// turned into geometry on worker threads (see <see cref="ChunkMesher"/>), then
+/// the finished data is applied back on the main thread a few chunks per frame.
+/// This keeps frame times flat while large numbers of chunks (re)build, which is
+/// what makes render-distance streaming feasible. Tests that need a finished
+/// world up front call <see cref="RebuildAllNow"/>, which meshes synchronously.</summary>
 public sealed partial class VoxelWorld : Node3D
 {
     public BlockTextures Textures { get; private set; }
@@ -15,7 +24,21 @@ public sealed partial class VoxelWorld : Node3D
     private readonly HashSet<Vector3I> _dirty = new();
     private readonly Queue<Vector3I> _dirtyQueue = new();
 
-    public int ChunksPerFrame = 4;
+    // Async meshing state.
+    private readonly HashSet<Vector3I> _meshing = new();          // jobs in flight (main thread only)
+    private readonly ConcurrentQueue<MeshJobResult> _results = new();
+    /// <summary>How many mesh jobs may be in flight at once. Bounds CPU + memory.</summary>
+    public int MaxConcurrentMeshes = 8;
+    /// <summary>How many finished meshes to upload per frame (caps the main-thread spike).</summary>
+    public int ApplyPerFrame = 6;
+
+    private struct MeshJobResult
+    {
+        public Vector3I Coord;
+        public int Version;
+        public ChunkMesher.MeshData Data;
+    }
+
     public IReadOnlyDictionary<Vector3I, Chunk> Chunks => _chunks;
 
     public override void _Ready()
@@ -27,16 +50,51 @@ public sealed partial class VoxelWorld : Node3D
 
     public override void _Process(double delta)
     {
-        int built = 0;
-        while (built < ChunksPerFrame && _dirtyQueue.Count > 0)
+        if (_streaming)
         {
-            var c = _dirtyQueue.Dequeue();
-            _dirty.Remove(c);
-            if (_chunks.TryGetValue(c, out var chunk) && chunk.Dirty)
+            UpdateStreaming();
+            PumpGeneration();
+        }
+        PumpMeshing();
+    }
+
+    // ---- async meshing pump -----------------------------------------------
+
+    private void PumpMeshing()
+    {
+        // Dispatch: snapshot dirty chunks on the main thread and mesh them on
+        // worker threads, up to the in-flight budget.
+        while (_meshing.Count < MaxConcurrentMeshes && _dirtyQueue.Count > 0)
+        {
+            var coord = _dirtyQueue.Dequeue();
+            _dirty.Remove(coord);
+            if (!_chunks.TryGetValue(coord, out var chunk) || !chunk.Dirty) continue;
+            if (_meshing.Contains(coord)) continue; // already meshing; staleness handled on apply
+            if (_streaming && !MeshEligible(coord)) continue; // wait for neighbours to generate
+
+            var snap = ChunkMesher.Capture(this, chunk);
+            int version = chunk.MeshVersion;
+            chunk.Dirty = false;
+            _meshing.Add(coord);
+            Task.Run(() =>
             {
-                RebuildChunk(chunk);
-                built++;
-            }
+                ChunkMesher.MeshData data = null;
+                try { data = ChunkMesher.BuildData(snap); }
+                catch (Exception) { /* surfaced on apply; chunk will retry */ }
+                _results.Enqueue(new MeshJobResult { Coord = coord, Version = version, Data = data });
+            });
+        }
+
+        // Apply: upload finished geometry on the main thread, a few per frame.
+        int applied = 0;
+        while (applied < ApplyPerFrame && _results.TryDequeue(out var r))
+        {
+            _meshing.Remove(r.Coord);
+            if (!_chunks.TryGetValue(r.Coord, out var chunk)) continue; // unloaded meanwhile
+            if (r.Data == null || chunk.MeshVersion != r.Version) { MarkDirty(r.Coord); continue; }
+            ChunkMesher.Apply(this, chunk, r.Data);
+            chunk.Dirty = false;
+            applied++;
         }
     }
 
@@ -122,8 +180,9 @@ public sealed partial class VoxelWorld : Node3D
 
     private void RebuildChunk(Chunk chunk)
     {
-        var r = ChunkMesher.Build(this, chunk);
-        chunk.ApplyMesh(r.Opaque, Textures.Material, r.Water, WaterMaterial, r.Collision);
+        var snap = ChunkMesher.Capture(this, chunk);
+        var data = ChunkMesher.BuildData(snap);
+        ChunkMesher.Apply(this, chunk, data);
         chunk.Dirty = false;
     }
 
@@ -133,7 +192,8 @@ public sealed partial class VoxelWorld : Node3D
         foreach (var c in _chunks.Keys) MarkDirty(c);
     }
 
-    /// <summary>Synchronously remesh all chunks now (used for initial load/tests).</summary>
+    /// <summary>Synchronously remesh all dirty chunks now (used for initial load and
+    /// headless tests, which need a finished world before asserting on it).</summary>
     public void RebuildAllNow()
     {
         foreach (var ch in _chunks.Values)
@@ -150,6 +210,9 @@ public sealed partial class VoxelWorld : Node3D
         _chunks.Clear();
         _dirty.Clear();
         _dirtyQueue.Clear();
+        _meshing.Clear();
+        while (_results.TryDequeue(out _)) { }
+        ResetStreaming();
     }
 
     // ---- water material (placeholder; upgraded with the swimming milestone) -

@@ -14,6 +14,15 @@ public sealed partial class Chunk : Node3D
     public bool Dirty = true;
     public int SolidCount;
 
+    /// <summary>Bumped on every block mutation. A mesh job captures this at dispatch
+    /// time; if it differs when the job's result returns, the chunk changed while
+    /// meshing off-thread and the stale result is discarded and re-meshed.</summary>
+    public int MeshVersion;
+
+    /// <summary>True once <see cref="ApplyMesh"/> has run at least once, so the
+    /// streamer/player can tell a freshly created chunk apart from a meshed one.</summary>
+    public bool Meshed { get; private set; }
+
     private MeshInstance3D _opaque;
     private MeshInstance3D _water;
     private CollisionShape3D _col;
@@ -33,6 +42,7 @@ public sealed partial class Chunk : Node3D
         else if (old != 0 && id == 0) SolidCount--;
         Blocks[i] = id;
         Dirty = true;
+        MeshVersion++;
     }
 
     public void RecomputeSolid()
@@ -40,6 +50,7 @@ public sealed partial class Chunk : Node3D
         SolidCount = 0;
         for (int i = 0; i < Volume; i++)
             if (Blocks[i] != 0) SolidCount++;
+        MeshVersion++;
     }
 
     public override void _Ready()
@@ -63,5 +74,11 @@ public sealed partial class Chunk : Node3D
         _water.MaterialOverride = waterMat;
         _col.Shape = collision;
         _col.Disabled = collision == null;
+        Meshed = true;
     }
+
+    /// <summary>True when this chunk has solid collision geometry the player can
+    /// stand on. The streamer uses it to avoid dropping the player into the void
+    /// before the ground under them has finished meshing.</summary>
+    public bool HasCollision => _col != null && _col.Shape != null && !_col.Disabled;
 }

@@ -140,6 +140,15 @@ public partial class Player : CharacterBody3D, IDamageable
 
         KeyboardLook(dt);
 
+        // While the ground beneath us is still streaming in, hold position rather
+        // than plummeting through not-yet-loaded terrain. (Creative flight ignores
+        // gravity, so it never needs this.)
+        if (!Creative && World != null && World.StreamingHold(GlobalPosition))
+        {
+            Velocity = Vector3.Zero;
+            return;
+        }
+
         if (Creative) FlyMove(dt);
         else if (InWater) SwimMove(dt);
         else GroundMove(dt);

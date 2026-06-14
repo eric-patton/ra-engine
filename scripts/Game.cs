@@ -56,6 +56,9 @@ public partial class Game : Node3D
             case "--test-controls":
                 RunControlsTest();
                 break;
+            case "--test-stream":
+                RunStreamTest();
+                break;
             case "--test-hud":
                 RunHudTest();
                 break;
@@ -155,17 +158,25 @@ public partial class Game : Node3D
         if (_menu != null) { _menu.QueueFree(); _menu = null; }
     }
 
-    /// <summary>A flat creative world for free building and pre-building levels.</summary>
+    /// <summary>An endless, procedurally generated creative world that streams
+    /// chunks in around the player as they explore.</summary>
     private void StartSandbox()
     {
         ClearMenu();
         _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
         AddChild(_session);
-        _session.Setup(new Vector3(24, 3, 24), creative: true);
-        Core.WorldGen.FlatGround(_session.World, -16, 64, -16, 64, 0);
-        _session.World.MarkAllDirty();
-        _session.World.RebuildAllNow();
-        _session.Hud.ShowBanner("Sandbox — build freely!  (move WASD · look arrows/numpad or mouse · +/- place/break · G fly · B mode)", 6f);
+
+        var gen = new Core.TerrainGenerator(seed: 1337);
+        int sx = 24, sz = 24;
+        int surface = gen.SurfaceHeight(sx, sz);
+        var spawn = new Vector3(sx + 0.5f, surface + 3f, sz + 0.5f);
+
+        _session.Setup(spawn, creative: true);
+        var world = _session.World;
+        world.StartStreaming(gen, _session.Player, renderDistance: 6, minChunkY: -1, maxChunkY: 3);
+        world.EnsureSpawnArea(spawn, radius: 2); // immediate ground under the player
+
+        _session.Hud.ShowBanner("Sandbox — endless world!  (WASD move · arrows/numpad or mouse look · +/- place/break · G fly · B mode)", 6f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();
     }
@@ -598,6 +609,47 @@ public partial class Game : Node3D
 
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-3 streaming test: a procedural world should load chunks around
+    /// a moving target, mesh them, provide solid ground, and unload chunks the
+    /// target leaves far behind.</summary>
+    private async void RunStreamTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+
+        var gen = new Core.TerrainGenerator(1337);
+        var target = new Node3D { Name = "Target" };
+        AddChild(target);
+        int surf0 = gen.SurfaceHeight(8, 8);
+        target.GlobalPosition = new Vector3(8, surf0 + 2, 8);
+        world.StartStreaming(gen, target, renderDistance: 4, minChunkY: -1, maxChunkY: 3);
+
+        // Let the area around the origin stream in.
+        await ToSignal(GetTree().CreateTimer(2.5), SceneTreeTimer.SignalName.Timeout);
+        int genNear = world.GeneratedChunkCount;
+        int chunksNear = world.ChunkCount;
+        int sh = gen.SurfaceHeight(8, 8);
+        bool groundExists = world.GetBlockId(8, sh, 8) != 0;
+        bool airAbove = world.GetBlockId(8, sh + 6, 8) == 0;
+        bool holdClear = !world.StreamingHold(new Vector3(8, sh + 1, 8));
+        int meshedNear = 0;
+        foreach (var kv in world.Chunks) if (kv.Value.Meshed) meshedNear++;
+        var originChunk = Core.VoxelWorld.ChunkCoord(8, sh, 8);
+
+        // Teleport far away: the origin region should unload, a new region load.
+        int fx = 8 + 16 * 48;
+        target.GlobalPosition = new Vector3(fx, gen.SurfaceHeight(fx, 8) + 2, 8);
+        await ToSignal(GetTree().CreateTimer(3.0), SceneTreeTimer.SignalName.Timeout);
+        bool originUnloaded = !world.Chunks.ContainsKey(originChunk);
+        bool farGround = world.GetBlockId(fx, gen.SurfaceHeight(fx, 8), 8) != 0;
+
+        GD.Print($"[RA] stream-test: genNear={genNear} chunksNear={chunksNear} meshedNear={meshedNear} " +
+                 $"groundExists={groundExists} airAbove={airAbove} holdClear={holdClear} " +
+                 $"originUnloaded={originUnloaded} farGround={farGround}");
         GetTree().Quit(0);
     }
 
