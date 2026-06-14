@@ -47,6 +47,10 @@ public sealed partial class VoxelWorld : Node3D
     private readonly Queue<Vector3I> _genQueue = new();
     private readonly ConcurrentQueue<GenResult> _genResults = new();
     private readonly List<Vector3I> _scratch = new();
+
+    // Player edits as deltas over the generated baseline, grouped by chunk so they
+    // can be re-applied each time a chunk regenerates. This is what gets saved.
+    private readonly Dictionary<Vector3I, Dictionary<Vector3I, ushort>> _edits = new();
     public int MaxConcurrentGen = 8;
     public int GeneratePerFrame = 8;
 
@@ -54,6 +58,39 @@ public sealed partial class VoxelWorld : Node3D
 
     public bool IsStreaming => _streaming;
     public int GeneratedChunkCount => _generated.Count;
+    public int Seed => _generator?.Seed ?? 0;
+    public int EditCount { get { int n = 0; foreach (var d in _edits.Values) n += d.Count; return n; } }
+
+    // ---- edit deltas (the saveable state of an infinite world) -------------
+
+    private void RecordEdit(Vector3I chunkCoord, int x, int y, int z, ushort id)
+    {
+        if (!_edits.TryGetValue(chunkCoord, out var d)) { d = new(); _edits[chunkCoord] = d; }
+        d[new Vector3I(x, y, z)] = id;
+    }
+
+    private void ApplyEdits(Vector3I coord, Chunk chunk)
+    {
+        if (!_edits.TryGetValue(coord, out var d)) return;
+        foreach (var (pos, id) in d)
+            chunk.SetLocal(Mod(pos.X, Chunk.Size), Mod(pos.Y, Chunk.Size), Mod(pos.Z, Chunk.Size), id);
+    }
+
+    /// <summary>Seed edits before streaming starts (used by world load). Keyed by
+    /// world position.</summary>
+    public void PreloadEdits(IEnumerable<(int x, int y, int z, ushort id)> edits)
+    {
+        foreach (var (x, y, z, id) in edits)
+            RecordEdit(ChunkCoord(x, y, z), x, y, z, id);
+    }
+
+    /// <summary>All player edits as (world position, block id) — for saving.</summary>
+    public IEnumerable<(Vector3I pos, ushort id)> AllEdits()
+    {
+        foreach (var d in _edits.Values)
+            foreach (var (pos, id) in d)
+                yield return (pos, id);
+    }
 
     private static readonly Vector3I[] FaceNeighbours =
     {
@@ -86,6 +123,7 @@ public sealed partial class VoxelWorld : Node3D
         _genPending.Clear();
         _genQueue.Clear();
         while (_genResults.TryDequeue(out _)) { }
+        _edits.Clear();
         _lastTargetChunk = new Vector3I(int.MinValue, 0, 0);
     }
 
@@ -108,6 +146,7 @@ public sealed partial class VoxelWorld : Node3D
             if (_generated.Contains(coord)) continue;
             var ch = GetOrCreate(coord);
             _generator.Generate(coord, ch.Blocks);
+            ApplyEdits(coord, ch);
             ch.RecomputeSolid();
             _generated.Add(coord);
         }
@@ -228,6 +267,7 @@ public sealed partial class VoxelWorld : Node3D
             _generating.Remove(r.Coord);
             if (!_chunks.TryGetValue(r.Coord, out var chunk)) continue; // unloaded meanwhile
             Array.Copy(r.Blocks, chunk.Blocks, Chunk.Volume);
+            ApplyEdits(r.Coord, chunk);
             chunk.RecomputeSolid();
             _generated.Add(r.Coord);
             applied++;

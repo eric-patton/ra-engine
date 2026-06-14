@@ -126,6 +126,26 @@ public partial class GameSession : Node3D
         _craft.OnClose = CloseCrafting;
     }
 
+    /// <summary>Snapshot this sandbox for saving: seed, player position, time of day,
+    /// inventory and the player's edit-deltas.</summary>
+    public SaveData CaptureSave(string name, long savedUnix)
+    {
+        var d = new SaveData
+        {
+            Name = name,
+            Seed = World.Seed,
+            SavedUnix = savedUnix,
+            PlayerPos = Player.GlobalPosition,
+            TimeOfDay = Env?.TimeOfDay ?? 0.4f,
+        };
+        if (Inventory != null)
+            foreach (ushort id in Inventory.Order)
+                d.Inventory[BlockRegistry.Get(id).Name] = Inventory.Count(id);
+        foreach (var (pos, id) in World.AllEdits())
+            d.Edits.Add((pos.X, pos.Y, pos.Z, BlockRegistry.Get(id).Name));
+        return d;
+    }
+
     private void ToggleCrafting()
     {
         if (_crafting) CloseCrafting();

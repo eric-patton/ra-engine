@@ -11,6 +11,14 @@ public partial class Game : Node3D
 {
     private GameSession _session;
     private UI.MainMenu _menu;
+    private UI.SaveMenu _saveMenu;
+    private string _saveName;
+
+    private static readonly (string block, int count)[] DefaultKit =
+    {
+        ("grass", 64), ("dirt", 64), ("stone", 64), ("cobblestone", 64),
+        ("planks", 64), ("oak_log", 32), ("mud_brick", 64), ("leaves", 32), ("lamp", 8),
+    };
 
     public override void _Ready()
     {
@@ -73,6 +81,9 @@ public partial class Game : Node3D
                 break;
             case "--test-craft":
                 RunCraftTest();
+                break;
+            case "--test-persist":
+                RunPersistTest();
                 break;
             case "--test-hud":
                 RunHudTest();
@@ -159,9 +170,11 @@ public partial class Game : Node3D
     {
         GetTree().Paused = false;
         if (_session != null) { _session.QueueFree(); _session = null; }
+        _saveName = null;
+        ClearMenu();
         _menu = new UI.MainMenu { Name = "MainMenu" };
         _menu.OnPlayLesson = id => StartLesson(Lessons.LessonCatalog.Get(id));
-        _menu.OnSandbox = StartSandbox;
+        _menu.OnSandbox = ShowSaveMenu;
         _menu.OnQuit = () => GetTree().Quit();
         AddChild(_menu);
         Core.AudioManager.StartMusic();   // calm bed under the menu
@@ -171,25 +184,85 @@ public partial class Game : Node3D
     private void ClearMenu()
     {
         if (_menu != null) { _menu.QueueFree(); _menu = null; }
+        if (_saveMenu != null) { _saveMenu.QueueFree(); _saveMenu = null; }
     }
 
-    /// <summary>An endless, procedurally generated creative world that streams
-    /// chunks in around the player as they explore.</summary>
-    private void StartSandbox()
+    /// <summary>The "Build Sandbox" world picker: new world or continue a saved one.</summary>
+    private void ShowSaveMenu()
     {
         ClearMenu();
-        _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
+        _saveMenu = new UI.SaveMenu { Name = "SaveMenu" };
+        _saveMenu.OnBack = ShowMainMenu;
+        _saveMenu.OnNewWorld = () => StartSandbox(NewWorldSave());
+        _saveMenu.OnLoad = name =>
+        {
+            var save = Core.SaveSystem.Load(name);
+            if (save != null) StartSandbox(save);
+            else StartSandbox(NewWorldSave());
+        };
+        AddChild(_saveMenu);
+    }
+
+    private Core.SaveData NewWorldSave()
+    {
+        long now = (long)Time.GetUnixTimeFromSystem();
+        var save = new Core.SaveData
+        {
+            Name = UniqueWorldName(),
+            Seed = (int)(now & 0x7FFFFFFF),
+            SavedUnix = now,
+            TimeOfDay = Core.EnvironmentController.Morning,
+        };
+        foreach (var (block, count) in DefaultKit) save.Inventory[block] = count;
+        return save;
+    }
+
+    private static string UniqueWorldName()
+    {
+        var taken = new System.Collections.Generic.HashSet<string>();
+        foreach (var s in Core.SaveSystem.List()) taken.Add(s.Name);
+        if (!taken.Contains("World")) return "World";
+        for (int i = 2; ; i++)
+            if (!taken.Contains($"World {i}")) return $"World {i}";
+    }
+
+    private void SaveCurrent()
+    {
+        if (_session == null || string.IsNullOrEmpty(_saveName)) return;
+        Core.SaveSystem.Save(_session.CaptureSave(_saveName, (long)Time.GetUnixTimeFromSystem()));
+    }
+
+    /// <summary>A fresh sandbox (used by the --sandbox CLI flag).</summary>
+    private void StartSandbox() => StartSandbox(NewWorldSave());
+
+    /// <summary>Build (or resume) an endless, procedurally generated creative world
+    /// from a save: the seed regenerates the terrain, edit-deltas are re-applied as
+    /// chunks stream in, and player position, time and inventory are restored. The
+    /// world auto-saves periodically and on returning to the menu.</summary>
+    private void StartSandbox(Core.SaveData save)
+    {
+        ClearMenu();
+        _saveName = save.Name;
+        _session = new GameSession { Name = "Session" };
+        _session.ReturnToMenuRequested = () => { SaveCurrent(); ShowMainMenu(); };
         AddChild(_session);
 
-        var gen = new Core.TerrainGenerator(seed: 1337);
-        int sx = 24, sz = 24;
-        int surface = gen.SurfaceHeight(sx, sz);
-        var spawn = new Vector3(sx + 0.5f, surface + 3f, sz + 0.5f);
+        var gen = new Core.TerrainGenerator(save.Seed);
+        Vector3 spawn = save.PlayerPos == Vector3.Zero
+            ? new Vector3(24.5f, gen.SurfaceHeight(24, 24) + 3f, 24.5f)
+            : save.PlayerPos;
 
         _session.Setup(spawn, creative: true);
+        _session.Env.TimeOfDay = save.TimeOfDay;
+        _session.Env.SetCycle(true);
+
         var world = _session.World;
+        var edits = new System.Collections.Generic.List<(int, int, int, ushort)>();
+        foreach (var (x, y, z, block) in save.Edits)
+            edits.Add((x, y, z, Core.BlockRegistry.IdOf(block)));
+        world.PreloadEdits(edits);
         world.StartStreaming(gen, _session.Player, renderDistance: 6, minChunkY: -1, maxChunkY: 3);
-        world.EnsureSpawnArea(spawn, radius: 2); // immediate ground under the player
+        world.EnsureSpawnArea(spawn, radius: 2);
 
         _session.Env.SetWeatherFollow(_session.Player);
         _session.AddChild(new Core.WeatherDirector
@@ -197,14 +270,18 @@ public partial class Game : Node3D
             Name = "Weather", Generator = gen, Player = _session.Player, Env = _session.Env,
         });
 
-        // Survival-style building: gather by breaking, spend by placing, craft on Tab.
-        _session.EnableSurvival(
-            ("grass", 64), ("dirt", 64), ("stone", 64), ("cobblestone", 64),
-            ("planks", 64), ("oak_log", 32), ("mud_brick", 64), ("leaves", 32), ("lamp", 8));
+        var kit = new System.Collections.Generic.List<(string, int)>();
+        foreach (var (block, count) in save.Inventory) kit.Add((block, count));
+        _session.EnableSurvival(kit.ToArray());
 
-        _session.Hud.ShowBanner("Sandbox — endless world!  (WASD move · look mouse/arrows · +/- place/break · G fly · Tab craft)", 6f);
+        var autosave = new Timer { Name = "AutoSave", WaitTime = 60, Autostart = true, OneShot = false };
+        _session.AddChild(autosave);
+        autosave.Timeout += SaveCurrent;
+
+        _session.Hud.ShowBanner($"{save.Name} — endless world!  (WASD · +/- place/break · G fly · Tab craft)", 6f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();
+        SaveCurrent(); // register the world in the save list right away
     }
 
     private GameSession StartLesson(Lessons.ILesson lesson)
@@ -638,6 +715,49 @@ public partial class Game : Node3D
         GD.Print($"[RA] controls-test: initFree={initFree} placed={placed} broke={broke} " +
                  $"yawDelta={yawDelta:F2} pitchDelta={pitchDelta:F2} mToggleCaptured={toggledCaptured}");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Phase-7 persistence test: a save round-trips through disk, and a
+    /// player edit re-applies over the regenerated terrain on reload.</summary>
+    private void RunPersistTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var d = new Core.SaveData
+        {
+            Name = "__persist_test__", Seed = 4321, SavedUnix = 123,
+            PlayerPos = new Vector3(10, 20, 30), TimeOfDay = 0.6f,
+        };
+        d.Inventory["stone"] = 12;
+        d.Inventory["planks"] = 5;
+        d.Edits.Add((1, 2, 3, "gold_block"));
+        Core.SaveSystem.Save(d);
+
+        var loaded = Core.SaveSystem.Load("__persist_test__");
+        bool basicsOk = loaded != null && loaded.Seed == 4321
+            && loaded.PlayerPos == new Vector3(10, 20, 30) && Mathf.IsEqualApprox(loaded.TimeOfDay, 0.6f);
+        bool invOk = loaded != null && loaded.Inventory.Count == 2
+            && loaded.Inventory.TryGetValue("stone", out int sc) && sc == 12;
+        bool editsOk = loaded != null && loaded.Edits.Count == 1 && loaded.Edits[0].block == "gold_block";
+        Core.SaveSystem.Delete("__persist_test__");
+        bool deleted = !Core.SaveSystem.Exists("__persist_test__");
+
+        // A preloaded edit must survive terrain regeneration.
+        var world = new Core.VoxelWorld { Name = "W" };
+        AddChild(world);
+        var gen = new Core.TerrainGenerator(4321);
+        int sh = gen.SurfaceHeight(5, 5);
+        ushort gold = Core.BlockRegistry.IdOf("gold_block");
+        world.PreloadEdits(new (int, int, int, ushort)[] { (5, sh + 1, 5, gold) });
+        var target = new Node3D { Name = "T" };
+        AddChild(target);
+        target.GlobalPosition = new Vector3(5, sh + 2, 5);
+        world.StartStreaming(gen, target, 3, -1, 3);
+        world.EnsureSpawnArea(new Vector3(5, 0, 5), 1);
+        bool editApplied = world.GetBlockId(5, sh + 1, 5) == gold;
+
+        GD.Print($"[RA] persist-test: basicsOk={basicsOk} invOk={invOk} editsOk={editsOk} " +
+                 $"deleted={deleted} editApplied={editApplied}");
+        QuitSoon();
     }
 
     /// <summary>Phase-6 crafting/inventory test: stacks add and consume, recipes

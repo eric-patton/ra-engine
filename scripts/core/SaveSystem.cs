@@ -1,0 +1,120 @@
+using System.Collections.Generic;
+using Godot;
+
+namespace RAEngine.Core;
+
+/// <summary>A saved sandbox world. Because the world is an infinite streamed,
+/// seeded one, we persist only the seed plus the player's edit-deltas (every block
+/// they changed from the generated baseline) — not the chunks themselves — along
+/// with the player position, time of day and inventory.</summary>
+public sealed class SaveData
+{
+    public string Name = "World";
+    public int Seed;
+    public long SavedUnix;
+    public Vector3 PlayerPos;
+    public float TimeOfDay = 0.4f;
+    public readonly Dictionary<string, int> Inventory = new();
+    public readonly List<(int x, int y, int z, string block)> Edits = new();
+}
+
+/// <summary>Reads and writes <see cref="SaveData"/> to <c>user://saves/*.rsave</c>
+/// using Godot's variant serialization.</summary>
+public static class SaveSystem
+{
+    private const string Dir = "user://saves";
+    private const int Version = 1;
+
+    private static string Sanitize(string name)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (char c in name)
+            sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
+        string s = sb.ToString().Trim('_');
+        return string.IsNullOrEmpty(s) ? "world" : s;
+    }
+
+    public static string PathFor(string name) => $"{Dir}/{Sanitize(name)}.rsave";
+    public static bool Exists(string name) => FileAccess.FileExists(PathFor(name));
+
+    public static void Save(SaveData d)
+    {
+        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(Dir));
+        using var f = FileAccess.Open(PathFor(d.Name), FileAccess.ModeFlags.Write);
+        if (f == null) { GD.PushError($"[Save] cannot write {PathFor(d.Name)}: {FileAccess.GetOpenError()}"); return; }
+
+        var inv = new Godot.Collections.Dictionary();
+        foreach (var (block, count) in d.Inventory) inv[block] = count;
+
+        var edits = new Godot.Collections.Array();
+        foreach (var (x, y, z, block) in d.Edits)
+            edits.Add(new Godot.Collections.Array { x, y, z, block });
+
+        var dict = new Godot.Collections.Dictionary
+        {
+            { "version", Version },
+            { "name", d.Name },
+            { "seed", d.Seed },
+            { "saved", d.SavedUnix },
+            { "player", d.PlayerPos },
+            { "time", d.TimeOfDay },
+            { "inventory", inv },
+            { "edits", edits },
+        };
+        f.StoreVar(dict);
+        GD.Print($"[Save] wrote '{d.Name}' (seed {d.Seed}, {d.Edits.Count} edits)");
+    }
+
+    public static SaveData Load(string name)
+    {
+        string path = PathFor(name);
+        if (!FileAccess.FileExists(path)) return null;
+        using var f = FileAccess.Open(path, FileAccess.ModeFlags.Read);
+        if (f == null) return null;
+        var dict = f.GetVar().AsGodotDictionary();
+        if (dict == null || dict.Count == 0) return null;
+
+        var d = new SaveData
+        {
+            Name = dict.TryGetValue("name", out var n) ? n.AsString() : name,
+            Seed = dict.TryGetValue("seed", out var s) ? s.AsInt32() : 0,
+            SavedUnix = dict.TryGetValue("saved", out var sv) ? sv.AsInt64() : 0,
+            PlayerPos = dict.TryGetValue("player", out var p) ? p.AsVector3() : Vector3.Zero,
+            TimeOfDay = dict.TryGetValue("time", out var t) ? t.AsSingle() : 0.4f,
+        };
+        if (dict.TryGetValue("inventory", out var invV))
+            foreach (var kv in invV.AsGodotDictionary())
+                d.Inventory[kv.Key.AsString()] = kv.Value.AsInt32();
+        if (dict.TryGetValue("edits", out var editsV))
+            foreach (var e in editsV.AsGodotArray())
+            {
+                var a = e.AsGodotArray();
+                if (a.Count >= 4)
+                    d.Edits.Add((a[0].AsInt32(), a[1].AsInt32(), a[2].AsInt32(), a[3].AsString()));
+            }
+        return d;
+    }
+
+    /// <summary>Headers of all saved worlds, newest first (name, seed, saved time).</summary>
+    public static List<SaveData> List()
+    {
+        var list = new List<SaveData>();
+        if (!DirAccess.DirExistsAbsolute(ProjectSettings.GlobalizePath(Dir))) return list;
+        using var dir = DirAccess.Open(Dir);
+        if (dir == null) return list;
+        foreach (string file in dir.GetFiles())
+        {
+            if (!file.EndsWith(".rsave")) continue;
+            var d = Load(file.Substring(0, file.Length - ".rsave".Length));
+            if (d != null) list.Add(d);
+        }
+        list.Sort((a, b) => b.SavedUnix.CompareTo(a.SavedUnix));
+        return list;
+    }
+
+    public static void Delete(string name)
+    {
+        string abs = ProjectSettings.GlobalizePath(PathFor(name));
+        if (System.IO.File.Exists(abs)) System.IO.File.Delete(abs);
+    }
+}

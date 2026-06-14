@@ -135,6 +135,10 @@ public sealed partial class VoxelWorld : Node3D
     public void SetBlock(int x, int y, int z, ushort id, bool remesh = true)
     {
         var c = ChunkCoord(x, y, z);
+        // In a streamed world every SetBlock is a player edit (generation writes
+        // block arrays directly), so record it as a delta over the generated
+        // baseline — that, plus the seed, is all we need to persist the world.
+        if (_streaming) RecordEdit(c, x, y, z, id);
         var ch = GetOrCreate(c);
         int lx = Mod(x, Chunk.Size), ly = Mod(y, Chunk.Size), lz = Mod(z, Chunk.Size);
         ch.SetLocal(lx, ly, lz, id);
