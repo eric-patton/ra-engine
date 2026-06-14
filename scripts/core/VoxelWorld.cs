@@ -214,6 +214,10 @@ public sealed partial class VoxelWorld : Node3D
     }
 
     public int ChunkCount => _chunks.Count;
+    /// <summary>Mesh jobs currently in flight on worker threads (for the debug HUD).</summary>
+    public int MeshingCount => _meshing.Count;
+    /// <summary>Chunks queued for (re)meshing (for the debug HUD).</summary>
+    public int DirtyCount => _dirty.Count;
 
     public void Clear()
     {

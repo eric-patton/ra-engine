@@ -83,6 +83,34 @@ public sealed class BlockTextures
 
     public int LayerFor(string name) => _layerOf.TryGetValue(name, out int l) ? l : 0;
 
+    private readonly Dictionary<ushort, Color> _avgColor = new();
+
+    /// <summary>The average albedo colour of a block's representative face — used to
+    /// tint break/place particles so dirt throws brown crumbs, leaves green flecks,
+    /// stone grey chips. Cached per block id (reuses the UI icon image).</summary>
+    public Color AverageColor(BlockType b)
+    {
+        if (_avgColor.TryGetValue(b.Id, out var cached)) return cached;
+        var avg = new Color(0.7f, 0.7f, 0.7f);
+        Image img = GetIcon(b)?.GetImage();
+        if (img != null)
+        {
+            if (img.IsCompressed()) img.Decompress();
+            int w = img.GetWidth(), h = img.GetHeight();
+            int sx = Mathf.Max(1, w / 8), sy = Mathf.Max(1, h / 8);
+            double r = 0, g = 0, bl = 0; int n = 0;
+            for (int y = 0; y < h; y += sy)
+            for (int x = 0; x < w; x += sx)
+            {
+                Color px = img.GetPixel(x, y);
+                r += px.R; g += px.G; bl += px.B; n++;
+            }
+            if (n > 0) avg = new Color((float)(r / n), (float)(g / n), (float)(bl / n));
+        }
+        _avgColor[b.Id] = avg;
+        return avg;
+    }
+
     private readonly Dictionary<ushort, Texture2D> _icons = new();
 
     /// <summary>A small Texture2D for UI (hotbar/inventory), from the block's

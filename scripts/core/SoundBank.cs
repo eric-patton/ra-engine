@@ -58,6 +58,8 @@ public static class SoundBank
             ["click"]  = Blip(660, 0.045, 0.35),
             ["select"] = Blip(880, 0.032, 0.30),
             ["talk"]   = Blip(520, 0.040, 0.22),
+            ["chime"]  = Chime(),
+            ["fanfare"]= Fanfare(),
         };
     }
 
@@ -164,6 +166,33 @@ public static class SoundBank
         var b = Buf(dur);
         Perc(b, 0.0, dur, freq, freq, amp, Wave.Sine, dur * 0.6);
         return Done(b);
+    }
+
+    /// <summary>A short bright major arpeggio (C–E–G) — plays when an objective ticks.</summary>
+    private static Clip Chime()
+    {
+        var b = Buf(0.55);
+        int[] notes = { 72, 76, 79 }; // C5 E5 G5
+        for (int i = 0; i < notes.Length; i++)
+            Perc(b, i * 0.085, 0.34, Midi(notes[i]), Midi(notes[i]), 0.30, Wave.Sine, 0.16);
+        return Done(b, peak: 0.8);
+    }
+
+    /// <summary>A rising five-note flourish with a sparkle tail — plays on lesson
+    /// completion / a big celebratory beat.</summary>
+    private static Clip Fanfare()
+    {
+        var b = Buf(1.2);
+        int[] notes = { 67, 72, 76, 79, 84 };          // G4 C5 E5 G5 C6
+        double[] at = { 0.0, 0.11, 0.22, 0.33, 0.50 };
+        for (int i = 0; i < notes.Length; i++)
+        {
+            bool last = i == notes.Length - 1;
+            Perc(b, at[i], last ? 0.55 : 0.22, Midi(notes[i]), Midi(notes[i]),
+                 last ? 0.34 : 0.26, Wave.Tri, last ? 0.30 : 0.12);
+        }
+        Perc(b, 0.50, 0.55, Midi(91), Midi(91), 0.12, Wave.Sine, 0.24); // sparkle an octave up
+        return Done(b, peak: 0.85);
     }
 
     // -----------------------------------------------------------------------

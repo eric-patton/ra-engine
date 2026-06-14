@@ -26,6 +26,7 @@ public partial class Game : Node3D
         GD.Print($"[RA] Game ready on Godot {version}");
         Core.Settings.Load();
         AddChild(new Core.AudioManager { Name = "Audio" }); // persistent, app-wide sound
+        AddChild(new Core.Fx { Name = "Fx" });               // persistent, app-wide particles + screen effects
 
         string mode = null;
         foreach (string arg in OS.GetCmdlineUserArgs())
@@ -99,6 +100,9 @@ public partial class Game : Node3D
                 break;
             case "--test-underwater":
                 RunUnderwaterTest();
+                break;
+            case "--test-fx":
+                RunFxTest();
                 break;
             case "--test-craft":
                 RunCraftTest();
@@ -254,6 +258,14 @@ public partial class Game : Node3D
     {
         if (_session == null || string.IsNullOrEmpty(_saveName)) return;
         Core.SaveSystem.Save(_session.CaptureSave(_saveName, (long)Time.GetUnixTimeFromSystem()));
+    }
+
+    /// <summary>Save the sandbox when the player closes the window, so a stray click on
+    /// the X never loses an hour of building. (Headless tests quit programmatically and
+    /// never raise this notification, so they are unaffected.)</summary>
+    public override void _Notification(int what)
+    {
+        if (what == NotificationWMCloseRequest) SaveCurrent();
     }
 
     /// <summary>A fresh sandbox (used by the --sandbox CLI flag).</summary>
@@ -959,6 +971,39 @@ public partial class Game : Node3D
         bool headUnder = session.Player.HeadUnderwater;
         await Capture("res://_underwater.png", 0.4);
         GD.Print($"[RA] underwater-test: headUnder={headUnder}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>FX test: smash a block to throw tinted debris (captured mid-flight),
+    /// then take a hit to show the red hurt-flash + camera shake. Run WINDOWED — the
+    /// screenshot path waits on FramePostDraw, which never fires under --headless.</summary>
+    private async void RunFxTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(24, 1, 24), creative: true, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, 0, 48, 0, 48, 0);
+        ushort dirt = Core.BlockRegistry.IdOf("dirt");
+        for (int y = 1; y <= 3; y++) session.World.SetBlock(24, y, 20, dirt, false); // a little pillar to smash
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+        session.Player.Head.Rotation = new Vector3(-0.12f, 0, 0); // look at the pillar
+
+        await ToSignal(GetTree().CreateTimer(0.5), SceneTreeTimer.SignalName.Timeout);
+        // Dirt is soft (0.5s), so a held break smashes it quickly and throws debris.
+        Input.ActionPress(Core.GameInput.Actions.KbBreak);
+        await ToSignal(GetTree().CreateTimer(0.7), SceneTreeTimer.SignalName.Timeout); // just after a break
+        await Capture("res://_fx_debris.png", 0.0);
+        Input.ActionRelease(Core.GameInput.Actions.KbBreak);
+
+        // Take a hit (creative suppresses damage, so drop it first) to trigger the
+        // red hurt-flash overlay + camera shake, captured while both are strong.
+        session.Player.SetCreative(false);
+        session.Player.Damage(20f, "test");
+        await Capture("res://_fx_hurt.png", 0.05);
+
+        GD.Print($"[RA] fx-test: captured debris + hurt flash (health={session.Player.Health:F0})");
         GetTree().Quit(0);
     }
 

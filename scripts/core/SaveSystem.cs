@@ -42,49 +42,87 @@ public static class SaveSystem
     public static void Save(SaveData d)
     {
         DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(Dir));
-        using var f = FileAccess.Open(PathFor(d.Name), FileAccess.ModeFlags.Write);
-        if (f == null) { GD.PushError($"[Save] cannot write {PathFor(d.Name)}: {FileAccess.GetOpenError()}"); return; }
+        string finalPath = PathFor(d.Name);
+        string tmpPath = finalPath + ".tmp";
 
-        var inv = new Godot.Collections.Dictionary();
-        foreach (var (block, count) in d.Inventory) inv[block] = count;
-
-        var edits = new Godot.Collections.Array();
-        foreach (var (x, y, z, block) in d.Edits)
-            edits.Add(new Godot.Collections.Array { x, y, z, block });
-
-        var signs = new Godot.Collections.Array();
-        foreach (var (pos, text) in d.Signposts)
-            signs.Add(new Godot.Collections.Array { pos, text });
-
-        var waypoints = new Godot.Collections.Array();
-        foreach (var (name, pos) in d.Waypoints)
-            waypoints.Add(new Godot.Collections.Array { name, pos });
-
-        var dict = new Godot.Collections.Dictionary
+        // 1. Serialize to a temp file first, so a crash or power loss mid-write can
+        //    never corrupt the existing save (uniquely demoralizing for this audience).
+        using (var f = FileAccess.Open(tmpPath, FileAccess.ModeFlags.Write))
         {
-            { "version", Version },
-            { "name", d.Name },
-            { "seed", d.Seed },
-            { "saved", d.SavedUnix },
-            { "player", d.PlayerPos },
-            { "time", d.TimeOfDay },
-            { "inventory", inv },
-            { "edits", edits },
-            { "signposts", signs },
-            { "waypoints", waypoints },
-        };
-        f.StoreVar(dict);
+            if (f == null) { GD.PushError($"[Save] cannot write {tmpPath}: {FileAccess.GetOpenError()}"); return; }
+
+            var inv = new Godot.Collections.Dictionary();
+            foreach (var (block, count) in d.Inventory) inv[block] = count;
+
+            var edits = new Godot.Collections.Array();
+            foreach (var (x, y, z, block) in d.Edits)
+                edits.Add(new Godot.Collections.Array { x, y, z, block });
+
+            var signs = new Godot.Collections.Array();
+            foreach (var (pos, text) in d.Signposts)
+                signs.Add(new Godot.Collections.Array { pos, text });
+
+            var waypoints = new Godot.Collections.Array();
+            foreach (var (name, pos) in d.Waypoints)
+                waypoints.Add(new Godot.Collections.Array { name, pos });
+
+            var dict = new Godot.Collections.Dictionary
+            {
+                { "version", Version },
+                { "name", d.Name },
+                { "seed", d.Seed },
+                { "saved", d.SavedUnix },
+                { "player", d.PlayerPos },
+                { "time", d.TimeOfDay },
+                { "inventory", inv },
+                { "edits", edits },
+                { "signposts", signs },
+                { "waypoints", waypoints },
+            };
+            f.StoreVar(dict);
+        } // closed before the swap below
+
+        // 2. Atomically swap the temp file into place, keeping the previous save as a
+        //    single rolling .bak that Load() falls back on if the main file is bad.
+        string absFinal = ProjectSettings.GlobalizePath(finalPath);
+        string absTmp = ProjectSettings.GlobalizePath(tmpPath);
+        string absBak = absFinal + ".bak";
+        try
+        {
+            if (System.IO.File.Exists(absFinal))
+                System.IO.File.Replace(absTmp, absFinal, absBak); // prev save -> .bak
+            else
+                System.IO.File.Move(absTmp, absFinal);
+        }
+        catch (System.Exception e)
+        {
+            // Replace can fail across some filesystems; fall back to a direct overwrite.
+            GD.PushWarning($"[Save] atomic swap failed ({e.Message}); writing directly.");
+            try { System.IO.File.Copy(absTmp, absFinal, true); System.IO.File.Delete(absTmp); }
+            catch (System.Exception e2) { GD.PushError($"[Save] direct write failed: {e2.Message}"); }
+        }
         GD.Print($"[Save] wrote '{d.Name}' (seed {d.Seed}, {d.Edits.Count} edits)");
     }
 
     public static SaveData Load(string name)
     {
         string path = PathFor(name);
+        var d = LoadFrom(path, name);
+        if (d != null) return d;
+        // The main file is missing or corrupt — recover from the rolling backup.
+        var bak = LoadFrom(path + ".bak", name);
+        if (bak != null) GD.Print($"[Save] '{name}' main file unreadable; recovered from .bak");
+        return bak;
+    }
+
+    private static SaveData LoadFrom(string path, string fallbackName)
+    {
         if (!FileAccess.FileExists(path)) return null;
         using var f = FileAccess.Open(path, FileAccess.ModeFlags.Read);
         if (f == null) return null;
         var dict = f.GetVar().AsGodotDictionary();
         if (dict == null || dict.Count == 0) return null;
+        string name = fallbackName;
 
         var d = new SaveData
         {

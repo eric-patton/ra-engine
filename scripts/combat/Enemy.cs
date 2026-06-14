@@ -174,41 +174,14 @@ public partial class Enemy : CharacterBody3D, IDamageable
         Velocity = Vector3.Zero;
         EmitSignal(SignalName.Defeated);
         AudioManager.Play("defeat");
-        SpawnPoof();
+        // A non-graphic dust/light puff at chest height (the pooled FX emitter
+        // outlives this enemy, which is about to be freed) plus a tiny impact beat.
+        Fx.Burst(GlobalPosition + new Vector3(0, _capsule.Height * 0.5f, 0),
+            FxKind.Poof, new Color(0.95f, 0.92f, 0.8f), 40);
+        Fx.HitStop(0.06f);
         // shrink and remove
         var tween = CreateTween();
         tween.TweenProperty(_model, "scale", Vector3.One * 0.01f, 0.45f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.In);
         tween.TweenCallback(Callable.From(QueueFree));
-    }
-
-    private void SpawnPoof()
-    {
-        var p = new GpuParticles3D
-        {
-            Amount = 40,
-            Lifetime = 0.7,
-            OneShot = true,
-            Emitting = true,
-            Explosiveness = 0.9f,
-        };
-        var mat = new ParticleProcessMaterial
-        {
-            Direction = Vector3.Up,
-            Spread = 80f,
-            InitialVelocityMin = 1.5f,
-            InitialVelocityMax = 3.5f,
-            Gravity = new Vector3(0, -2f, 0),
-            ScaleMin = 0.15f,
-            ScaleMax = 0.4f,
-            Color = new Color(0.95f, 0.92f, 0.8f),
-        };
-        p.ProcessMaterial = mat;
-        p.DrawPass1 = new QuadMesh { Size = new Vector2(0.3f, 0.3f) };
-        // Parent to the world (not this enemy, which is about to be freed) so the
-        // poof plays out its full lifetime, then frees itself.
-        var parent = GetParent();
-        parent.AddChild(p);
-        p.GlobalPosition = GlobalPosition + new Vector3(0, _capsule.Height * 0.5f, 0);
-        GetTree().CreateTimer(1.3).Timeout += () => { if (GodotObject.IsInstanceValid(p)) p.QueueFree(); };
     }
 }

@@ -12,6 +12,10 @@ public partial class Player : CharacterBody3D, IDamageable
     [Signal] public delegate void HealthChangedEventHandler(float current, float max);
     [Signal] public delegate void AirChangedEventHandler(float current, float max);
     [Signal] public delegate void DiedEventHandler();
+    /// <summary>Fired when damage actually lands (after Creative/SafeMode guards), so
+    /// the HUD can flash and the camera can shake. <paramref name="cause"/> is e.g.
+    /// "fall", "drown", "hazard", "hit".</summary>
+    [Signal] public delegate void HurtEventHandler(float amount, string cause);
 
     public VoxelWorld World;
     public float MouseSensitivity = 0.0026f;
@@ -59,6 +63,7 @@ public partial class Player : CharacterBody3D, IDamageable
     private bool _stepFlip;       // alternates footstep pitch for a natural gait
     private bool _wasInWater;     // to detect the splash when first entering water
     private float _hurtCd;        // throttles the hurt sound
+    private GpuParticles3D _bubbles; // rising bubbles emitted while the head is underwater
 
     public Camera3D Camera => _cam;
     public Node3D Head => _head;
@@ -76,6 +81,10 @@ public partial class Player : CharacterBody3D, IDamageable
         AddChild(_head);
         _cam = new Camera3D { Name = "Camera", Fov = 75f };
         _head.AddChild(_cam);
+
+        _bubbles = MakeBubbles();
+        _head.AddChild(_bubbles);
+        _bubbles.Position = new Vector3(0, 0.05f, -0.25f); // rise from just in front of the face
 
         _airApexY = GlobalPosition.Y;
         EmitSignal(SignalName.HealthChanged, Health, MaxHealth);
@@ -302,6 +311,9 @@ public partial class Player : CharacterBody3D, IDamageable
             float fall = _airApexY - GlobalPosition.Y;
             if (!InWater && fall > 0.4f)
                 AudioManager.Play("land", 1f, Mathf.Lerp(-8f, 0f, Mathf.Min(fall / 6f, 1f)));
+            // A small landing kick (even on a safe drop), scaling with the fall height.
+            if (!InWater && fall > 1.2f)
+                Fx.Shake(Mathf.Clamp((fall - 1.2f) / 8f, 0.06f, 0.5f));
             if (!InWater && fall > FallSafe)
                 Damage((fall - FallSafe) * FallDamagePerBlock, "fall");
             _airApexY = GlobalPosition.Y;
@@ -322,8 +334,52 @@ public partial class Player : CharacterBody3D, IDamageable
         // almost fully out — which is what makes exiting onto a bank feel right.
         InWater = World.GetBlock(FloorV(p + new Vector3(0, 0.1f, 0))).IsLiquid;
         HeadUnderwater = World.GetBlock(FloorV(p + new Vector3(0, eye, 0))).IsLiquid;
-        if (InWater && !_wasInWater) AudioManager.Play("splash");
+        if (InWater && !_wasInWater)
+        {
+            AudioManager.Play("splash");
+            Fx.Burst(GlobalPosition, FxKind.Splash, new Color(0.72f, 0.86f, 1f), 24);
+            Fx.Shake(0.08f);
+        }
+        if (_bubbles != null) _bubbles.Emitting = HeadUnderwater; // bubbles only while submerged
         _wasInWater = InWater;
+    }
+
+    /// <summary>A small stream of rising bubbles from the face, emitting only while the
+    /// head is submerged. World-space (LocalCoords off) so they trail as you swim.</summary>
+    private static GpuParticles3D MakeBubbles()
+    {
+        var mat = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
+            EmissionSphereRadius = 0.22f,
+            Direction = Vector3.Up,
+            Spread = 22f,
+            Gravity = new Vector3(0, 1.3f, 0), // bubbles rise
+            InitialVelocityMin = 0.4f,
+            InitialVelocityMax = 1.0f,
+            ScaleMin = 0.4f,
+            ScaleMax = 1.0f,
+            Color = new Color(0.85f, 0.95f, 1f, 0.7f),
+        };
+        var mesh = new QuadMesh { Size = new Vector2(0.05f, 0.05f) };
+        mesh.SurfaceSetMaterial(0, new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            VertexColorUseAsAlbedo = true,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        });
+        return new GpuParticles3D
+        {
+            Name = "Bubbles",
+            Amount = 16,
+            Lifetime = 1.6f,
+            Emitting = false,
+            LocalCoords = false,
+            ProcessMaterial = mat,
+            DrawPass1 = mesh,
+        };
     }
 
     private void UpdateCrouch()
@@ -380,6 +436,7 @@ public partial class Player : CharacterBody3D, IDamageable
         if (IsDead || Creative || SafeMode || amount <= 0) return;
         Health = Mathf.Max(0, Health - amount);
         EmitSignal(SignalName.HealthChanged, Health, MaxHealth);
+        EmitSignal(SignalName.Hurt, amount, cause);
         // Discrete hits/falls yelp; the tiny per-frame hazard ticks don't (and a
         // short cooldown keeps a flurry of hits from machine-gunning the sound).
         if (amount > 1.5f && _hurtCd <= 0f) { AudioManager.Play("hurt"); _hurtCd = 0.25f; }

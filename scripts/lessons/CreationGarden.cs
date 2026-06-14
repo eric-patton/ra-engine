@@ -70,6 +70,9 @@ public sealed class CreationGarden : ILesson
             session.Hud.CompleteObjective(1);
             session.Narrator.Show("And God saw everything that He had made, and behold, it was very good.");
             session.Hud.ShowCenter("The Garden of Eden\nAnd it was very good.", 0f);
+            // celebrate reaching the Tree of Life: a fanfare and a shower of golden motes
+            Core.AudioManager.Play("fanfare");
+            Core.Fx.Burst(new Vector3(32, 11, 12), Core.FxKind.Sparkle, new Color(1f, 0.95f, 0.6f), 48);
         };
     }
 

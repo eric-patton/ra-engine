@@ -68,6 +68,7 @@ public static class GameInput
         // teacher tools
         Key(Actions.Teacher, Godot.Key.F1);
         Key(Actions.Screenshot, Godot.Key.F2);
+        Key(Actions.Debug, Godot.Key.F3);
     }
 
     private static void Ensure(string action)
@@ -128,5 +129,6 @@ public static class GameInput
         public const string ToggleBuild = "toggle_build";
         public const string Teacher = "teacher";
         public const string Screenshot = "screenshot";
+        public const string Debug = "debug_hud";
     }
 }

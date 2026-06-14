@@ -108,9 +108,19 @@ public partial class GameSession : Node3D
 
         Player.HealthChanged += Hud.SetHealth;
         Player.AirChanged += Hud.SetAir;
+        Player.HealthChanged += (cur, max) => Hud.SetLowHealth(max > 0 ? cur / max : 0f);
         // seed the bars now, since Player._Ready already emitted its initial values
         Hud.SetHealth(Player.Health, Player.MaxHealth);
         Hud.SetAir(Player.Air, Player.MaxAir);
+
+        // Screen "juice": a camera shaker (shakes only the camera's local offset, so
+        // mouse-look stays intact) plus a HUD hurt-flash. Register them with the
+        // app-wide Fx facade so any code can trigger them in one line.
+        var screenFx = new ScreenFx { Name = "ScreenFx", Camera = Player.Camera };
+        Player.AddChild(screenFx);
+        Fx.OnShake = screenFx.AddTrauma;
+        Fx.OnFlash = Hud.Flash;
+        Player.Hurt += OnPlayerHurt;
 
         SetMode(creative ? Mode.Build : Mode.Adventure);
 
@@ -316,6 +326,7 @@ public partial class GameSession : Node3D
         if (Player == null) return;
         // Light tint at the waterline (body in water), strong murk when submerged.
         Hud.SetUnderwater(Player.HeadUnderwater ? 1f : (Player.InWater ? 0.35f : 0f));
+        Hud.SetAirDarken(Player.MaxAir > 0f ? 1f - Player.Air / Player.MaxAir : 0f);
 
         // Keep the compass pointing where the player faces (North = -Z).
         Vector3 fwd = -Player.GlobalTransform.Basis.Z;
@@ -323,6 +334,18 @@ public partial class GameSession : Node3D
 
         // HUD clock follows the time of day.
         if (Env != null) Hud.SetClock(Env.ClockText());
+
+        // F3 debug HUD (any mode): FPS, draw calls, chunk pipeline, player position.
+        if (Input.IsActionJustPressed(GameInput.Actions.Debug)) Hud.ToggleDebug();
+        if (Hud.DebugVisible)
+        {
+            Vector3 pp = Player.GlobalPosition;
+            long draws = (long)RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalDrawCallsInFrame);
+            Hud.SetDebug(
+                $"FPS {Engine.GetFramesPerSecond()}   draws {draws}\n" +
+                $"chunks {World.ChunkCount}   meshing {World.MeshingCount}   dirty {World.DirtyCount}\n" +
+                $"pos  {pp.X:F0}, {pp.Y:F0}, {pp.Z:F0}");
+        }
 
         // Present mode: HUD is hidden; F2 grabs a screenshot, Esc returns.
         if (_presentMode)
@@ -484,5 +507,25 @@ public partial class GameSession : Node3D
         World.AddChild(e);
         e.GlobalPosition = position;
         return e;
+    }
+
+    /// <summary>A landed hit flashes the screen red and kicks the camera, both scaled
+    /// by the hit size. (SafeMode/Creative already suppress damage, so this never
+    /// fires for a protected class.)</summary>
+    private void OnPlayerHurt(float amount, string cause)
+    {
+        Hud.FlashHurt(Mathf.Clamp(0.35f + amount / 45f, 0.35f, 0.85f));
+        Fx.Shake(Mathf.Clamp(amount / 25f, 0.12f, 0.5f));
+    }
+
+    public override void _ExitTree()
+    {
+        // Drop the static FX handlers that point at this session's camera/HUD, so the
+        // app-wide Fx facade never calls into a freed node after the session ends.
+        if (Fx.OnShake != null || Fx.OnFlash != null)
+        {
+            Fx.OnShake = null;
+            Fx.OnFlash = null;
+        }
     }
 }

@@ -153,6 +153,12 @@ public partial class BlockInteractor : Node3D
         {
             _crackStage = stage;
             _crackMat.AlbedoTexture = _crackStages[stage];
+            // Each new crack stage spits a few chips and gives a tiny impact kick, so
+            // chipping away at a block feels weighty (fires ~8 times over a full mine).
+            var mb = World.GetBlock(_miningCell);
+            Color chipTint = World.Textures?.AverageColor(mb) ?? new Color(0.6f, 0.6f, 0.6f);
+            Fx.Burst((Vector3)_miningCell + new Vector3(0.5f, 0.5f, 0.5f), FxKind.Debris, chipTint, 4);
+            Fx.Shake(0.035f);
         }
         _crack.GlobalPosition = (Vector3)_miningCell + new Vector3(0.5f, 0.5f, 0.5f);
         _crack.Visible = true;
@@ -265,6 +271,14 @@ public partial class BlockInteractor : Node3D
         World.SetBlock(cell, 0);
         if (!b.IsLiquid) Inventory?.Add(b.Id); // collect the dropped block
         AudioManager.Play("break");
+        if (!b.IsLiquid)
+        {
+            // Throw a burst of debris tinted by the broken block (brown crumbs, green
+            // flecks, grey chips) and a small kick for impact.
+            Color tint = World.Textures?.AverageColor(b) ?? new Color(0.6f, 0.6f, 0.6f);
+            Fx.Burst((Vector3)cell + new Vector3(0.5f, 0.5f, 0.5f), FxKind.Debris, tint, 16);
+            Fx.Shake(0.05f);
+        }
         return true;
     }
 
@@ -278,6 +292,9 @@ public partial class BlockInteractor : Node3D
         World.SetBlock(cell, id);
         Inventory?.TryConsume(id);
         AudioManager.Play("place");
+        // A soft dust poof, lightened from the placed block's colour.
+        Color poof = (World.Textures?.AverageColor(BlockRegistry.Get(id)) ?? Colors.White).Lerp(Colors.White, 0.4f);
+        Fx.Burst((Vector3)cell + new Vector3(0.5f, 0.5f, 0.5f), FxKind.Poof, poof, 10);
         return true;
     }
 

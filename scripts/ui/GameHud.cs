@@ -22,6 +22,7 @@ public partial class GameHud : CanvasLayer
     public override void _Ready()
     {
         BuildUnderwater();
+        BuildDamage();
         BuildCrosshair();
         BuildHotbar();
         BuildBars();
@@ -32,7 +33,30 @@ public partial class GameHud : CanvasLayer
         BuildObjectives();
         BuildCompass();
         BuildClock();
+        BuildDebug();
+        BuildFade(); // last: a scene-transition curtain drawn over everything
     }
+
+    // ---- debug HUD (F3) ---------------------------------------------------
+
+    private Label _debug;
+
+    public bool DebugVisible => _debug != null && _debug.Visible;
+
+    private void BuildDebug()
+    {
+        _debug = new Label { Name = "Debug", Visible = false };
+        _debug.AddThemeFontSizeOverride("font_size", 15);
+        _debug.AddThemeColorOverride("font_color", new Color(0.7f, 1f, 0.7f));
+        _debug.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _debug.AddThemeConstantOverride("outline_size", 4);
+        _debug.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _debug.Position = new Vector2(20, 96); // below the health/air bars
+        AddChild(_debug);
+    }
+
+    public void ToggleDebug() { if (_debug != null) _debug.Visible = !_debug.Visible; }
+    public void SetDebug(string text) { if (_debug != null && _debug.Text != text) _debug.Text = text; }
 
     // ---- clock ------------------------------------------------------------
 
@@ -148,17 +172,123 @@ public partial class GameHud : CanvasLayer
     /// submerged. The effect eases toward this each frame.</summary>
     public void SetUnderwater(float target) => _uwTarget = Mathf.Clamp(target, 0f, 1f);
 
+    private float _airDarken; // 0 = full air, 1 = out of breath (deepens the underwater murk)
+
+    /// <summary>How starved of air the swimmer is (0..1). Deepens the underwater
+    /// vignette as a gentle "come up for air" cue. Only visible while submerged.</summary>
+    public void SetAirDarken(float v) => _airDarken = Mathf.Clamp(v, 0f, 1f);
+
+    // ---- damage / low-health overlay --------------------------------------
+
+    private ColorRect _damage;
+    private ShaderMaterial _damageMat;
+    private float _dmgFlash;   // transient hit flash, decays to 0
+    private float _lowHealth;  // sustained 0..1 low-health pulse strength
+
+    private void BuildDamage()
+    {
+        _damage = new ColorRect { Name = "Damage", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _damage.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        var shader = GD.Load<Shader>("res://assets/shaders/damage.gdshader");
+        if (shader != null)
+        {
+            _damageMat = new ShaderMaterial { Shader = shader };
+            _damage.Material = _damageMat;
+        }
+        AddChild(_damage);
+    }
+
+    /// <summary>A coloured edge flash (amount 0..1) that fades out — used for hits.</summary>
+    public void Flash(Color color, float amount)
+    {
+        if (_damageMat == null) return;
+        _damageMat.SetShaderParameter("flash_color", color);
+        _dmgFlash = Mathf.Max(_dmgFlash, Mathf.Clamp(amount, 0f, 1f));
+    }
+
+    /// <summary>Red hurt flash (the common case).</summary>
+    public void FlashHurt(float amount = 0.7f) => Flash(new Color(0.85f, 0.06f, 0.05f), amount);
+
+    /// <summary>Drive the low-health pulse from a health fraction (0..1). Pulses only
+    /// when badly hurt (under ~30%); clears at full health or on death-screen.</summary>
+    public void SetLowHealth(float healthFraction)
+    {
+        const float thresh = 0.3f;
+        _lowHealth = healthFraction < thresh && healthFraction > 0.001f
+            ? (thresh - healthFraction) / thresh
+            : 0f;
+    }
+
     public override void _Process(double delta)
     {
-        if (_underwater == null) return;
-        if (!Mathf.IsEqualApprox(_uwStrength, _uwTarget))
-            _uwStrength = Mathf.MoveToward(_uwStrength, _uwTarget, (float)delta * 3.5f);
+        float dt = (float)delta;
 
-        bool show = _uwStrength > 0.001f;
-        _underwater.Visible = show;
-        if (!show) return;
-        if (_underwaterMat != null) _underwaterMat.SetShaderParameter("strength", _uwStrength);
-        else _underwater.Color = new Color(0.12f, 0.36f, 0.55f, _uwStrength * 0.34f); // fallback tint
+        // Underwater post-process: ease strength toward the target, deepen by low air.
+        if (_underwater != null)
+        {
+            if (!Mathf.IsEqualApprox(_uwStrength, _uwTarget))
+                _uwStrength = Mathf.MoveToward(_uwStrength, _uwTarget, dt * 3.5f);
+            bool show = _uwStrength > 0.001f;
+            _underwater.Visible = show;
+            if (show)
+            {
+                if (_underwaterMat != null)
+                {
+                    _underwaterMat.SetShaderParameter("strength", _uwStrength);
+                    _underwaterMat.SetShaderParameter("low_air", _airDarken);
+                }
+                else _underwater.Color = new Color(0.12f, 0.36f, 0.55f, _uwStrength * 0.34f); // fallback tint
+            }
+        }
+
+        // Damage / low-health overlay: decay the transient flash, push uniforms.
+        if (_damageMat != null)
+        {
+            if (_dmgFlash > 0f) _dmgFlash = Mathf.MoveToward(_dmgFlash, 0f, dt * 2.5f);
+            _damageMat.SetShaderParameter("flash_amount", _dmgFlash);
+            _damageMat.SetShaderParameter("low_health", _lowHealth);
+            bool dshow = _dmgFlash > 0.001f || _lowHealth > 0.001f;
+            if (_damage.Visible != dshow) _damage.Visible = dshow;
+        }
+    }
+
+    // ---- scene-transition fade --------------------------------------------
+
+    private ColorRect _fade;
+
+    private void BuildFade()
+    {
+        _fade = new ColorRect
+        {
+            Name = "Fade",
+            Color = new Color(0, 0, 0, 0),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false,
+        };
+        _fade.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        AddChild(_fade);
+    }
+
+    /// <summary>Fade the screen to black over <paramref name="seconds"/> (for lesson
+    /// beats / scene transitions). Awaitable so a lesson can sequence on it.</summary>
+    public async System.Threading.Tasks.Task FadeToBlack(float seconds = 0.6f)
+    {
+        if (_fade == null) return;
+        _fade.Visible = true;
+        var tween = CreateTween();
+        tween.TweenProperty(_fade, "color", new Color(0, 0, 0, 1), seconds);
+        await ToSignal(tween, Tween.SignalName.Finished);
+    }
+
+    /// <summary>Fade back in from black over <paramref name="seconds"/>.</summary>
+    public async System.Threading.Tasks.Task FadeIn(float seconds = 0.6f)
+    {
+        if (_fade == null) return;
+        _fade.Visible = true;
+        var tween = CreateTween();
+        tween.TweenProperty(_fade, "color", new Color(0, 0, 0, 0), seconds);
+        await ToSignal(tween, Tween.SignalName.Finished);
+        _fade.Visible = false;
     }
 
     private void BuildWeaponLabel()
@@ -313,6 +443,7 @@ public partial class GameHud : CanvasLayer
         if (i < 0 || i >= _objLabels.Count) return;
         _objLabels[i].Text = "☑  " + _objText[i];
         _objLabels[i].Modulate = new Color(0.6f, 1f, 0.6f, 0.85f);
+        AudioManager.Play("chime"); // a warm reward at the moment progress is earned
     }
 
     private int _centerToken;

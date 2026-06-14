@@ -8,6 +8,7 @@ shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, repeat_disable, filter_linear_mipmap;
 uniform float strength : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 water_tint : source_color = vec3(0.10, 0.34, 0.52);
+uniform float low_air : hint_range(0.0, 1.0) = 0.0; // 0 = fresh, 1 = out of breath
 
 void fragment() {
     vec2 uv = SCREEN_UV;
@@ -28,6 +29,10 @@ void fragment() {
     // Vignette: darken the edges for an enclosed, underwater feel.
     float vig = distance(uv, vec2(0.5));
     col *= mix(1.0, 1.0 - vig * 0.8, strength);
+
+    // Out of breath: deepen the vignette and dim overall — a gentle "surface!" cue.
+    col *= mix(1.0, 1.0 - vig * 1.2, low_air);
+    col *= mix(1.0, 0.80, low_air);
 
     COLOR = vec4(col, 1.0);
 }
