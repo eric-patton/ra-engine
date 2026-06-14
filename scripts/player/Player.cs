@@ -52,6 +52,10 @@ public partial class Player : CharacterBody3D, IDamageable
     private bool _wasOnFloor = true;
     private float _drownTimer;
     private float _actionLock;
+    private float _stepDist;      // distance walked since the last footstep sound
+    private bool _stepFlip;       // alternates footstep pitch for a natural gait
+    private bool _wasInWater;     // to detect the splash when first entering water
+    private float _hurtCd;        // throttles the hurt sound
 
     public Camera3D Camera => _cam;
     public Node3D Head => _head;
@@ -128,6 +132,7 @@ public partial class Player : CharacterBody3D, IDamageable
     {
         float dt = (float)delta;
         if (_actionLock > 0f) _actionLock -= dt;
+        if (_hurtCd > 0f) _hurtCd -= dt;
         UpdateWaterState();
         UpdateCrouch();
 
@@ -170,11 +175,32 @@ public partial class Player : CharacterBody3D, IDamageable
         vel.Z = horiz.Z;
 
         if (IsOnFloor() && InputEnabled && Input.IsActionJustPressed(GameInput.Actions.Jump) && !_crouching)
+        {
             vel.Y = JumpVel;
+            AudioManager.Play("jump", 1f, -4f);
+        }
 
         Velocity = vel;
         MoveAndSlide();
+        Footsteps(dt);
         TrackFall();
+    }
+
+    /// <summary>Play a footstep every stride's worth of ground distance, alternating
+    /// pitch for a natural gait. Quiet, and skipped while airborne or barely moving.</summary>
+    private void Footsteps(float dt)
+    {
+        if (!IsOnFloor()) { _stepDist = 0f; return; }
+        float hsp = new Vector2(Velocity.X, Velocity.Z).Length();
+        if (hsp < 0.7f) { _stepDist = 0f; return; }
+        _stepDist += hsp * dt;
+        float stride = _crouching ? 1.4f : (hsp > 5.5f ? 2.4f : 1.9f);
+        if (_stepDist >= stride)
+        {
+            _stepDist = 0f;
+            _stepFlip = !_stepFlip;
+            AudioManager.Play("step", _stepFlip ? 1.08f : 0.92f, -5f);
+        }
     }
 
     private void SwimMove(float dt)
@@ -260,6 +286,8 @@ public partial class Player : CharacterBody3D, IDamageable
         else if (!_wasOnFloor)
         {
             float fall = _airApexY - GlobalPosition.Y;
+            if (!InWater && fall > 0.4f)
+                AudioManager.Play("land", 1f, Mathf.Lerp(-8f, 0f, Mathf.Min(fall / 6f, 1f)));
             if (!InWater && fall > FallSafe)
                 Damage((fall - FallSafe) * FallDamagePerBlock, "fall");
             _airApexY = GlobalPosition.Y;
@@ -280,6 +308,8 @@ public partial class Player : CharacterBody3D, IDamageable
         // almost fully out — which is what makes exiting onto a bank feel right.
         InWater = World.GetBlock(FloorV(p + new Vector3(0, 0.1f, 0))).IsLiquid;
         HeadUnderwater = World.GetBlock(FloorV(p + new Vector3(0, eye, 0))).IsLiquid;
+        if (InWater && !_wasInWater) AudioManager.Play("splash");
+        _wasInWater = InWater;
     }
 
     private void UpdateCrouch()
@@ -336,6 +366,9 @@ public partial class Player : CharacterBody3D, IDamageable
         if (IsDead || Creative || amount <= 0) return;
         Health = Mathf.Max(0, Health - amount);
         EmitSignal(SignalName.HealthChanged, Health, MaxHealth);
+        // Discrete hits/falls yelp; the tiny per-frame hazard ticks don't (and a
+        // short cooldown keeps a flurry of hits from machine-gunning the sound).
+        if (amount > 1.5f && _hurtCd <= 0f) { AudioManager.Play("hurt"); _hurtCd = 0.25f; }
         if (Health <= 0) Die();
     }
 

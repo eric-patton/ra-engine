@@ -112,6 +112,7 @@ public partial class BlockInteractor : Node3D
         var b = World.GetBlock(cell);
         if (b.IsAir) return false;
         World.SetBlock(cell, 0);
+        AudioManager.Play("break");
         return true;
     }
 
@@ -122,6 +123,7 @@ public partial class BlockInteractor : Node3D
         if (!existing.IsAir && !existing.IsLiquid) return false;
         if (WouldHitPlayer(cell) && BlockRegistry.Get(id).Solid) return false;
         World.SetBlock(cell, id);
+        AudioManager.Play("place");
         return true;
     }
 

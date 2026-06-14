@@ -17,6 +17,7 @@ public partial class Game : Node3D
         var version = (string)Engine.GetVersionInfo()["string"];
         GD.Print($"[RA] Game ready on Godot {version}");
         Core.Settings.Load();
+        AddChild(new Core.AudioManager { Name = "Audio" }); // persistent, app-wide sound
 
         string mode = null;
         foreach (string arg in OS.GetCmdlineUserArgs())
@@ -30,6 +31,10 @@ public partial class Game : Node3D
                 break;
             case "--gen-textures":
                 Tools.TextureForge.GenerateAll();
+                QuitSoon();
+                break;
+            case "--gen-audio":
+                GenAudio();
                 QuitSoon();
                 break;
             case "--test-blocks":
@@ -90,6 +95,46 @@ public partial class Game : Node3D
 
     private void QuitSoon() => GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
 
+    /// <summary>Dump every synthesized sound to assets/audio/*.wav for inspection
+    /// (the game itself generates these at runtime; the files are a dev artifact).</summary>
+    private void GenAudio()
+    {
+        const string dir = "res://assets/audio";
+        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath(dir));
+        int n = 0;
+        foreach (var kv in Core.SoundBank.BuildAll())
+        {
+            byte[] pcm = Core.SoundBank.ToPcm16(kv.Value.Samples);
+            using var f = Godot.FileAccess.Open($"{dir}/{kv.Key}.wav", Godot.FileAccess.ModeFlags.Write);
+            if (f == null) continue;
+            f.StoreBuffer(WavFile(pcm, Core.SoundBank.Rate));
+            n++;
+        }
+        GD.Print($"[RA] gen-audio: wrote {n} wav files to {dir}");
+    }
+
+    private static byte[] WavFile(byte[] pcm, int rate)
+    {
+        using var ms = new System.IO.MemoryStream();
+        using var w = new System.IO.BinaryWriter(ms);
+        const int channels = 1, bits = 16;
+        w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+        w.Write(36 + pcm.Length);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+        w.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+        w.Write(16);                       // fmt chunk size
+        w.Write((short)1);                 // PCM
+        w.Write((short)channels);
+        w.Write(rate);
+        w.Write(rate * channels * bits / 8); // byte rate
+        w.Write((short)(channels * bits / 8)); // block align
+        w.Write((short)bits);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+        w.Write(pcm.Length);
+        w.Write(pcm);
+        return ms.ToArray();
+    }
+
     // ---- menu / session flow ---------------------------------------------
 
     private void ShowMainMenu()
@@ -101,6 +146,8 @@ public partial class Game : Node3D
         _menu.OnSandbox = StartSandbox;
         _menu.OnQuit = () => GetTree().Quit();
         AddChild(_menu);
+        Core.AudioManager.StartMusic();   // calm bed under the menu
+        Core.AudioManager.StopAmbience(); // outdoor ambience belongs to play, not menu
     }
 
     private void ClearMenu()
@@ -119,6 +166,8 @@ public partial class Game : Node3D
         _session.World.MarkAllDirty();
         _session.World.RebuildAllNow();
         _session.Hud.ShowBanner("Sandbox — build freely!  (move WASD · look arrows/numpad or mouse · +/- place/break · G fly · B mode)", 6f);
+        Core.AudioManager.StartMusic();
+        Core.AudioManager.StartAmbience();
     }
 
     private GameSession StartLesson(Lessons.ILesson lesson)
@@ -129,6 +178,8 @@ public partial class Game : Node3D
         _session.Setup(lesson.Spawn, creative: false);
         lesson.Build(_session);
         _session.Hud.ShowBanner($"{lesson.Title}", 4f);
+        Core.AudioManager.StartMusic();
+        Core.AudioManager.StartAmbience();
         return _session;
     }
 

@@ -82,6 +82,7 @@ public partial class WeaponController : Node3D
     private void SwingMelee()
     {
         AnimateSwing();
+        AudioManager.Play("swing");
         Camera3D cam = Player.Camera;
         Vector3 from = cam.GlobalPosition;
         Vector3 to = from + -cam.GlobalTransform.Basis.Z * Current.Range;
@@ -96,6 +97,7 @@ public partial class WeaponController : Node3D
     private void FireRanged()
     {
         AnimateRecoil();
+        AudioManager.Play("shoot");
         Camera3D cam = Player.Camera;
         Vector3 fwd = -cam.GlobalTransform.Basis.Z;
         Vector3 vel = (fwd + Vector3.Up * Current.ProjectileArc).Normalized() * Current.ProjectileSpeed;

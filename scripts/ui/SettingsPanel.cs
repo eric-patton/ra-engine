@@ -34,6 +34,8 @@ public partial class SettingsPanel : CanvasLayer
             v => { Settings.KeyboardLookSpeed = v; Settings.Save(); }, "0"));
         box.AddChild(Slider("Master volume", 0f, 1f, Settings.MasterVolume,
             v => { Settings.MasterVolume = v; Settings.Save(); }));
+        box.AddChild(Slider("Music & ambience", 0f, 1f, Settings.MusicVolume,
+            v => { Settings.MusicVolume = v; Settings.Save(); }));
 
         var back = UiKit.Button("Back");
         back.Pressed += () => { Visible = false; OnBack?.Invoke(); };

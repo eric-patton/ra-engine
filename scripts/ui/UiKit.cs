@@ -1,4 +1,5 @@
 using Godot;
+using RAEngine.Core;
 
 namespace RAEngine.UI;
 
@@ -11,6 +12,7 @@ public static class UiKit
     {
         var b = new Button { Text = text, CustomMinimumSize = new Vector2(360, 54) };
         b.AddThemeFontSizeOverride("font_size", fontSize);
+        b.Pressed += () => AudioManager.Play("click");
         var normal = Style(new Color(0.12f, 0.13f, 0.18f, 0.95f), new Color(0.5f, 0.5f, 0.6f, 0.8f));
         var hover = Style(new Color(0.2f, 0.22f, 0.3f, 0.98f), Gold);
         var pressed = Style(new Color(0.08f, 0.08f, 0.11f, 1f), Gold);

@@ -30,3 +30,6 @@ _*.png
 _*.png.import
 /shots/
 .lastpid
+
+# Dev artifact: audio is synthesized at runtime (--gen-audio dumps these for inspection)
+assets/audio/

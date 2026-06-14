@@ -109,6 +109,7 @@ public partial class DialogueBox : CanvasLayer
 
         _speaker.Text = _current.Speaker;
         _text.Text = _current.Text;
+        if (!string.IsNullOrEmpty(_current.Text)) Core.AudioManager.Play("talk");
 
         foreach (Node c in _choices.GetChildren()) c.QueueFree();
         bool hasChoices = _current.Choices is { Count: > 0 };

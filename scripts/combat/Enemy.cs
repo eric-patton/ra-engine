@@ -144,6 +144,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
         Health = Mathf.Max(0, Health - amount);
         _bar.SetFraction(Health / MaxHealth);
         Flash();
+        if (Health > 0) AudioManager.Play("hit"); // defeat plays its own sound
         if (Health <= 0) Defeat();
     }
 
@@ -172,6 +173,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
         SetCollisionLayerValue(1, false);
         Velocity = Vector3.Zero;
         EmitSignal(SignalName.Defeated);
+        AudioManager.Play("defeat");
         SpawnPoof();
         // shrink and remove
         var tween = CreateTween();

@@ -18,7 +18,8 @@ public static class Settings
     public enum MouseCapture { Off, ClickToCapture, Always }
 
     public static float MouseSensitivity = 1.0f; // multiplier on the base look speed
-    public static float MasterVolume = 0.8f;      // 0..1
+    public static float MasterVolume = 0.8f;      // 0..1, the "Master" bus
+    public static float MusicVolume = 0.5f;       // 0..1, the "Music" bus (music + ambience)
     public static MouseCapture CaptureMode = MouseCapture.ClickToCapture;
     public static float KeyboardLookSpeed = 110f; // degrees/sec for arrow/numpad look
     public static bool Loaded;
@@ -32,6 +33,7 @@ public static class Settings
         {
             MouseSensitivity = (float)(double)cfg.GetValue("input", "mouse_sensitivity", 1.0);
             MasterVolume = (float)(double)cfg.GetValue("audio", "master_volume", 0.8);
+            MusicVolume = (float)(double)cfg.GetValue("audio", "music_volume", 0.5);
             CaptureMode = (MouseCapture)cfg.GetValue("input", "mouse_capture_mode", (int)MouseCapture.ClickToCapture).AsInt32();
             KeyboardLookSpeed = (float)(double)cfg.GetValue("input", "keyboard_look_speed", 110.0);
         }
@@ -44,6 +46,7 @@ public static class Settings
         var cfg = new ConfigFile();
         cfg.SetValue("input", "mouse_sensitivity", MouseSensitivity);
         cfg.SetValue("audio", "master_volume", MasterVolume);
+        cfg.SetValue("audio", "music_volume", MusicVolume);
         cfg.SetValue("input", "mouse_capture_mode", (int)CaptureMode);
         cfg.SetValue("input", "keyboard_look_speed", KeyboardLookSpeed);
         cfg.Save(Path);
@@ -52,8 +55,14 @@ public static class Settings
 
     public static void Apply()
     {
-        int bus = AudioServer.GetBusIndex("Master");
+        SetBus("Master", MasterVolume);
+        SetBus("Music", MusicVolume); // no-op until AudioManager creates the bus
+    }
+
+    private static void SetBus(string name, float linear)
+    {
+        int bus = AudioServer.GetBusIndex(name);
         if (bus >= 0)
-            AudioServer.SetBusVolumeDb(bus, Mathf.LinearToDb(Mathf.Clamp(MasterVolume, 0.0001f, 1f)));
+            AudioServer.SetBusVolumeDb(bus, Mathf.LinearToDb(Mathf.Clamp(linear, 0.0001f, 1f)));
     }
 }

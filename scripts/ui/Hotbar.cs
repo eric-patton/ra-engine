@@ -131,12 +131,12 @@ public partial class Hotbar : Control
 
     public override void _UnhandledInput(InputEvent e)
     {
-        if (e.IsActionPressed(GameInput.Actions.HotbarNext)) Next();
-        else if (e.IsActionPressed(GameInput.Actions.HotbarPrev)) Prev();
+        if (e.IsActionPressed(GameInput.Actions.HotbarNext)) { Next(); AudioManager.Play("select"); }
+        else if (e.IsActionPressed(GameInput.Actions.HotbarPrev)) { Prev(); AudioManager.Play("select"); }
         else
         {
             for (int i = 0; i < Slots && i < _blocks.Count; i++)
-                if (e.IsActionPressed($"hotbar_{i + 1}")) { Select(i); return; }
+                if (e.IsActionPressed($"hotbar_{i + 1}")) { Select(i); AudioManager.Play("select"); return; }
         }
     }
 }
