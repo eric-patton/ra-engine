@@ -97,6 +97,9 @@ public partial class Game : Node3D
             case "--test-swim":
                 RunSwimTest();
                 break;
+            case "--test-underwater":
+                RunUnderwaterTest();
+                break;
             case "--test-craft":
                 RunCraftTest();
                 break;
@@ -913,6 +916,49 @@ public partial class Game : Node3D
         bool noLeak = world.GetBlockId(8, sea + 1, 8) != water;
         GD.Print($"[RA] waterfill-test: interior={interior} filled={filled} " +
                  $"allFilled={filled == interior} noLeakAboveSea={noLeak}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Underwater post-process test: submerge the camera in a water box and
+    /// look at a colourful wall through several metres of water, so the murk + blue
+    /// shift + refraction wobble + vignette are visible (HUD stays crisp on top).</summary>
+    private async void RunUnderwaterTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(8, 5, 8), creative: true, captureMouse: false);
+        ushort water = Core.BlockRegistry.IdOf("water");
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        ushort gold = Core.BlockRegistry.IdOf("gold_block");
+        ushort grass = Core.BlockRegistry.IdOf("grass");
+        ushort brick = Core.BlockRegistry.IdOf("brick");
+        for (int x = 0; x <= 16; x++)
+        for (int z = 0; z <= 16; z++)
+        {
+            session.World.SetBlock(x, 0, z, stone, false); // floor
+            for (int y = 1; y <= 9; y++)
+            {
+                bool wall = x == 0 || x == 16 || z == 0 || z == 16;
+                session.World.SetBlock(x, y, z, wall ? stone : water, false);
+            }
+        }
+        // A colourful wall at z=3 to view through the water.
+        for (int x = 4; x <= 12; x++)
+        for (int y = 1; y <= 7; y++)
+        {
+            ushort b = ((x + y) % 3 == 0) ? gold : ((x + y) % 3 == 1) ? grass : brick;
+            session.World.SetBlock(x, y, 3, b, false);
+        }
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+
+        session.Player.GlobalPosition = new Vector3(8, 5, 10); // submerged, facing -Z toward the wall
+        session.Player.Head.Rotation = new Vector3(-0.12f, 0, 0);
+        await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
+        bool headUnder = session.Player.HeadUnderwater;
+        await Capture("res://_underwater.png", 0.4);
+        GD.Print($"[RA] underwater-test: headUnder={headUnder}");
         GetTree().Quit(0);
     }
 

@@ -119,15 +119,47 @@ public partial class GameHud : CanvasLayer
         }
     }
 
+    private ShaderMaterial _underwaterMat;
+    private float _uwStrength;   // current, smoothed
+    private float _uwTarget;     // 0 = dry, ~0.35 = at the waterline, 1 = submerged
+
     private void BuildUnderwater()
     {
-        _underwater = new ColorRect { Color = new Color(0.12f, 0.36f, 0.55f, 0f), MouseFilter = Control.MouseFilterEnum.Ignore };
+        // A full-screen overlay running the underwater post-process shader. As the
+        // FIRST HUD child it samples only the 3D scene, so the world warps/murks but
+        // the HUD on top stays crisp. Hidden (no cost) while dry.
+        _underwater = new ColorRect { MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
         _underwater.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        var shader = GD.Load<Shader>("res://assets/shaders/underwater.gdshader");
+        if (shader != null)
+        {
+            _underwaterMat = new ShaderMaterial { Shader = shader };
+            _underwater.Material = _underwaterMat;
+        }
+        else
+        {
+            // Fallback: the old flat blue tint if the shader is missing.
+            _underwater.Color = new Color(0.12f, 0.36f, 0.55f, 0f);
+        }
         AddChild(_underwater);
     }
 
-    public void SetUnderwater(bool on) =>
-        _underwater.Color = new Color(0.12f, 0.36f, 0.55f, on ? 0.34f : 0f);
+    /// <summary>Target underwater intensity: 0 dry, ~0.35 at the waterline, 1 fully
+    /// submerged. The effect eases toward this each frame.</summary>
+    public void SetUnderwater(float target) => _uwTarget = Mathf.Clamp(target, 0f, 1f);
+
+    public override void _Process(double delta)
+    {
+        if (_underwater == null) return;
+        if (!Mathf.IsEqualApprox(_uwStrength, _uwTarget))
+            _uwStrength = Mathf.MoveToward(_uwStrength, _uwTarget, (float)delta * 3.5f);
+
+        bool show = _uwStrength > 0.001f;
+        _underwater.Visible = show;
+        if (!show) return;
+        if (_underwaterMat != null) _underwaterMat.SetShaderParameter("strength", _uwStrength);
+        else _underwater.Color = new Color(0.12f, 0.36f, 0.55f, _uwStrength * 0.34f); // fallback tint
+    }
 
     private void BuildWeaponLabel()
     {

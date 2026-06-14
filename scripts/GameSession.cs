@@ -314,7 +314,8 @@ public partial class GameSession : Node3D
     public override void _Process(double delta)
     {
         if (Player == null) return;
-        Hud.SetUnderwater(Player.HeadUnderwater);
+        // Light tint at the waterline (body in water), strong murk when submerged.
+        Hud.SetUnderwater(Player.HeadUnderwater ? 1f : (Player.InWater ? 0.35f : 0f));
 
         // Keep the compass pointing where the player faces (North = -Z).
         Vector3 fwd = -Player.GlobalTransform.Basis.Z;
