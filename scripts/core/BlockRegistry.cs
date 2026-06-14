@@ -116,6 +116,16 @@ public static class BlockRegistry
         SetHard(3.0f, "gold_block", "bronze_block");
         SetHard(6.0f, "bedrock");
 
+        // Footstep / break / mining sound family. Default is Stone, so only the
+        // softer / distinct materials need listing.
+        SetMat(MaterialSound.Grass, "grass", "leaves", "olive_leaves");
+        SetMat(MaterialSound.Dirt, "dirt", "clay", "mud_brick");
+        SetMat(MaterialSound.Sand, "sand", "sandstone", "gravel");
+        SetMat(MaterialSound.Wood, "oak_log", "planks", "thatch");
+        SetMat(MaterialSound.Snow, "snow");
+        SetMat(MaterialSound.Metal, "gold_block", "bronze_block", "lamp");
+        SetMat(MaterialSound.Cloth, "cloth_red", "cloth_blue", "cloth_cream");
+
         GD.Print($"[Blocks] Registered {ById.Count} block types.");
     }
 
@@ -123,5 +133,11 @@ public static class BlockRegistry
     {
         foreach (var n in names)
             if (ByName.TryGetValue(n, out var b)) b.Hardness = seconds;
+    }
+
+    private static void SetMat(MaterialSound mat, params string[] names)
+    {
+        foreach (var n in names)
+            if (ByName.TryGetValue(n, out var b)) b.Material = mat;
     }
 }

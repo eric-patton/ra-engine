@@ -119,9 +119,15 @@ public partial class BlockInteractor : Node3D
 
         _miningProgress += dt / b.Hardness;
 
-        // Periodic soft "tap" while mining (quiet, throttled).
+        // Periodic material "tap" while mining (quiet, throttled). Harder blocks
+        // thunk lower and heavier; soft ones tap higher.
         _hitSfx -= dt;
-        if (_hitSfx <= 0f) { AudioManager.Play("step", 0.7f, -7f); _hitSfx = 0.26f; }
+        if (_hitSfx <= 0f)
+        {
+            float pitch = Mathf.Clamp(1.15f - b.Hardness * 0.12f, 0.6f, 1.15f);
+            AudioManager.Play($"mine_{b.Material}", pitch, -7f);
+            _hitSfx = 0.26f;
+        }
 
         if (_miningProgress >= 1f)
         {
@@ -270,7 +276,7 @@ public partial class BlockInteractor : Node3D
         if (b.IsAir) return false;
         World.SetBlock(cell, 0);
         if (!b.IsLiquid) Inventory?.Add(b.Id); // collect the dropped block
-        AudioManager.Play("break");
+        AudioManager.Play($"break_{b.Material}");
         if (!b.IsLiquid)
         {
             // Throw a burst of debris tinted by the broken block (brown crumbs, green

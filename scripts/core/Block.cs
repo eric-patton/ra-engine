@@ -6,6 +6,11 @@ public enum Face : byte { PosX = 0, NegX = 1, PosY = 2, NegY = 3, PosZ = 4, NegZ
 
 public enum RenderType : byte { None, Opaque, Water }
 
+/// <summary>Acoustic family for a block — picks which footstep / break / mining
+/// sound variant plays. Defaults to <see cref="Stone"/>; set per type in
+/// <see cref="BlockRegistry"/>.</summary>
+public enum MaterialSound : byte { Stone, Dirt, Grass, Sand, Wood, Snow, Metal, Cloth }
+
 /// <summary>Definition of one block type. Texture names refer to folders under
 /// <c>assets/textures/blocks/</c>; layer indices are resolved when the
 /// <see cref="BlockTextures"/> arrays are built.</summary>
@@ -32,6 +37,8 @@ public sealed class BlockType
     /// <summary>Seconds to mine this block by hand at base speed. 0 (or less) breaks
     /// instantly; larger is tougher. Set per type in <see cref="BlockRegistry"/>.</summary>
     public float Hardness = 0.6f;
+    /// <summary>Which footstep/break/mining sound family this block uses.</summary>
+    public MaterialSound Material = MaterialSound.Stone;
 
     public bool IsAir => Render == RenderType.None;
     public bool IsLiquid => Render == RenderType.Water;

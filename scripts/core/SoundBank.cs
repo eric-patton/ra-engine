@@ -42,11 +42,11 @@ public static class SoundBank
     /// built lazily by their own methods so headless tests don't pay for them.</summary>
     public static Dictionary<string, Clip> BuildSfx()
     {
-        return new Dictionary<string, Clip>
+        var d = new Dictionary<string, Clip>
         {
             ["place"]  = Place(),
-            ["break"]  = Break(),
-            ["step"]   = Step(),
+            ["break"]  = Break(),   // generic fallback
+            ["step"]   = Step(),    // generic fallback
             ["jump"]   = Jump(),
             ["land"]   = Land(),
             ["splash"] = Splash(),
@@ -61,6 +61,81 @@ public static class SoundBank
             ["chime"]  = Chime(),
             ["fanfare"]= Fanfare(),
         };
+        // Per-material footstep / break / mining variants, keyed e.g. "step_Grass",
+        // "break_Wood", "mine_Stone" — callers build the id from the block's
+        // MaterialSound. Unknown keys are a safe no-op in AudioManager.
+        foreach (MaterialSound m in System.Enum.GetValues<MaterialSound>())
+        {
+            d[$"step_{m}"]  = StepFor(m);
+            d[$"break_{m}"] = BreakFor(m);
+            d[$"mine_{m}"]  = MineFor(m);
+        }
+        return d;
+    }
+
+    // -----------------------------------------------------------------------
+    //  Per-material footstep / break / mining sounds
+    // -----------------------------------------------------------------------
+
+    private static Clip StepFor(MaterialSound m)
+    {
+        var b = Buf(0.08);
+        var rng = new Rng(37 + (uint)m * 7u);
+        switch (m)
+        {
+            case MaterialSound.Grass: Noise(b, 0, 0.06, 0.26, rng, 2400, 900, 0.020); break;
+            case MaterialSound.Dirt:  Noise(b, 0, 0.06, 0.30, rng, 1300, 380, 0.025); break;
+            case MaterialSound.Sand:  Noise(b, 0, 0.07, 0.28, rng, 3600, 1500, 0.030); break;
+            case MaterialSound.Wood:  Perc(b, 0, 0.05, 220, 160, 0.22, Wave.Tri, 0.030);
+                                      Noise(b, 0, 0.03, 0.12, rng, 2000, 800, 0.015); break;
+            case MaterialSound.Snow:  Noise(b, 0, 0.075, 0.30, rng, 2700, 1000, 0.035); break;
+            case MaterialSound.Metal: Perc(b, 0, 0.06, 1200, 950, 0.16, Wave.Sine, 0.040);
+                                      Noise(b, 0, 0.02, 0.08, rng, 5000, 3000, 0.010); break;
+            case MaterialSound.Cloth: Noise(b, 0, 0.06, 0.20, rng, 850, 300, 0.030); break;
+            default:                  Noise(b, 0, 0.06, 0.30, rng, 1500, 380, 0.025); break; // Stone
+        }
+        return Done(b);
+    }
+
+    private static Clip BreakFor(MaterialSound m)
+    {
+        var b = Buf(0.18);
+        var rng = new Rng(23 + (uint)m * 13u);
+        switch (m)
+        {
+            case MaterialSound.Grass: Noise(b, 0, 0.14, 0.45, rng, 3600, 1200, 0.06); break;
+            case MaterialSound.Dirt:  Noise(b, 0, 0.13, 0.50, rng, 3000, 500, 0.06);
+                                      Perc(b, 0, 0.06, 90, 70, 0.25, Wave.Tri, 0.04); break;
+            case MaterialSound.Sand:  Noise(b, 0, 0.16, 0.50, rng, 5000, 1500, 0.07); break;
+            case MaterialSound.Wood:  Perc(b, 0, 0.06, 300, 120, 0.40, Wave.Tri, 0.03);
+                                      Noise(b, 0, 0.12, 0.40, rng, 2500, 600, 0.05); break;
+            case MaterialSound.Snow:  Noise(b, 0, 0.14, 0.42, rng, 2800, 800, 0.06); break;
+            case MaterialSound.Metal: Perc(b, 0, 0.10, 900, 520, 0.40, Wave.Square, 0.07);
+                                      Perc(b, 0, 0.13, 1450, 1350, 0.18, Wave.Sine, 0.09); break;
+            case MaterialSound.Cloth: Noise(b, 0, 0.13, 0.38, rng, 1200, 400, 0.06); break;
+            default:                  Noise(b, 0, 0.15, 0.60, rng, 4500, 700, 0.06);
+                                      Perc(b, 0, 0.07, 95, 70, 0.32, Wave.Tri, 0.04); break; // Stone
+        }
+        return Done(b);
+    }
+
+    private static Clip MineFor(MaterialSound m)
+    {
+        var b = Buf(0.08);
+        var rng = new Rng(53 + (uint)m * 17u);
+        switch (m)
+        {
+            case MaterialSound.Grass: Noise(b, 0, 0.045, 0.24, rng, 2200, 900, 0.020); break;
+            case MaterialSound.Dirt:  Noise(b, 0, 0.05, 0.28, rng, 1500, 500, 0.025); break;
+            case MaterialSound.Sand:  Noise(b, 0, 0.05, 0.26, rng, 3400, 1400, 0.025); break;
+            case MaterialSound.Wood:  Perc(b, 0, 0.05, 260, 180, 0.28, Wave.Tri, 0.030); break;
+            case MaterialSound.Snow:  Noise(b, 0, 0.05, 0.26, rng, 2600, 900, 0.030); break;
+            case MaterialSound.Metal: Perc(b, 0, 0.05, 1300, 1000, 0.20, Wave.Sine, 0.035); break;
+            case MaterialSound.Cloth: Noise(b, 0, 0.05, 0.18, rng, 900, 320, 0.030); break;
+            default:                  Perc(b, 0, 0.05, 420, 260, 0.28, Wave.Square, 0.030);
+                                      Noise(b, 0, 0.03, 0.12, rng, 3000, 800, 0.015); break; // Stone
+        }
+        return Done(b);
     }
 
     /// <summary>Everything, including the looping beds — used by <c>--gen-audio</c>.</summary>

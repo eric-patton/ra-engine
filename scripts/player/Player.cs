@@ -220,8 +220,16 @@ public partial class Player : CharacterBody3D, IDamageable
         {
             _stepDist = 0f;
             _stepFlip = !_stepFlip;
-            AudioManager.Play("step", _stepFlip ? 1.08f : 0.92f, -5f);
+            AudioManager.Play($"step_{GroundMaterial()}", _stepFlip ? 1.08f : 0.92f, -5f);
         }
+    }
+
+    /// <summary>The sound material of the block underfoot, for footstep audio.</summary>
+    private MaterialSound GroundMaterial()
+    {
+        if (World == null) return MaterialSound.Dirt;
+        var b = World.GetBlock(FloorV(GlobalPosition + new Vector3(0, -0.2f, 0)));
+        return b.IsAir || b.IsLiquid ? MaterialSound.Dirt : b.Material;
     }
 
     private void SwimMove(float dt)
