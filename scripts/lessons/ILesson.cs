@@ -17,6 +17,9 @@ public interface ILesson
     /// <summary>The time of day to pin this lesson to (0..1), or null to let the
     /// day/night cycle run. Default: a bright mid-morning.</summary>
     float? TimeOfDay => Core.EnvironmentController.Morning;
+
+    /// <summary>Background music mood for this lesson. Default: Calm.</summary>
+    Core.MusicMood Mood => Core.MusicMood.Calm;
 }
 
 /// <summary>Catalogue of available lessons (used by the menu and CLI).</summary>

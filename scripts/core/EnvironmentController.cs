@@ -25,6 +25,7 @@ public sealed partial class EnvironmentController : Node3D
     private readonly ValueNoise2D _windNoise = new(9001);
     public Weather Weather { get; private set; } = Weather.Clear;
     public Vector2 Wind { get; private set; } = new(1f, 0f);
+    private float _dayFactor = 1f; // 0 at night, 1 at midday (drives ambience blend)
 
     public DirectionalLight3D Sun => _sun;
     public DirectionalLight3D Moon => _moon;
@@ -102,6 +103,17 @@ public sealed partial class EnvironmentController : Node3D
             Apply();
         }
         UpdateWeather();
+        PushAmbience();
+    }
+
+    /// <summary>Blend the ambience beds with the light and weather: day birdsong vs
+    /// night crickets, ducked under a rain bed while it's raining.</summary>
+    private void PushAmbience()
+    {
+        float wet = Weather == Weather.Rain ? 1f : 0f;
+        float day = _dayFactor * (1f - wet);
+        float night = (1f - _dayFactor) * (1f - wet);
+        AudioManager.SetAmbienceMix(day, night, wet);
     }
 
     /// <summary>Pin the world to a fixed time and stop the cycle (used by lessons
@@ -339,6 +351,7 @@ public sealed partial class EnvironmentController : Node3D
         OrientLight(_moon, toMoon);
 
         float dayFactor = Mathf.SmoothStep(-0.12f, 0.30f, sunUp);
+        _dayFactor = dayFactor;
         _sun.LightEnergy = dayFactor * 1.4f;
         _sun.LightColor = SunWarm.Lerp(SunNoon, Mathf.SmoothStep(0f, 0.35f, sunUp));
         _sun.Visible = dayFactor > 0.01f;

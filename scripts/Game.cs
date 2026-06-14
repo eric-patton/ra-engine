@@ -209,6 +209,7 @@ public partial class Game : Node3D
         _menu.OnQuit = () => GetTree().Quit();
         AddChild(_menu);
         Core.AudioManager.StartMusic();   // calm bed under the menu
+        Core.AudioManager.SetMusicMood(Core.MusicMood.Calm);
         Core.AudioManager.StopAmbience(); // outdoor ambience belongs to play, not menu
     }
 
@@ -321,6 +322,7 @@ public partial class Game : Node3D
         _session.Hud.ShowBanner($"{save.Name} — endless world!  (WASD · +/- place/break · G fly · Tab craft)", 6f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();
+        Core.AudioManager.SetMusicMood(Core.MusicMood.Calm);
         SaveCurrent(); // register the world in the save list right away
     }
 
@@ -336,6 +338,7 @@ public partial class Game : Node3D
         _session.Hud.ShowBanner($"{lesson.Title}", 4f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();
+        Core.AudioManager.SetMusicMood(lesson.Mood);
         return _session;
     }
 

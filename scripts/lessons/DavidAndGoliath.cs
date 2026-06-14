@@ -15,6 +15,7 @@ public sealed class DavidAndGoliath : ILesson
     public string Title => "David and Goliath";
     public string Subtitle => "The Valley of Elah — 1 Samuel 17";
     public Vector3 Spawn => new(32, 3, 52);
+    public Core.MusicMood Mood => Core.MusicMood.Solemn; // the tension of the valley
 
     private GameSession _s;
 
@@ -101,6 +102,8 @@ public sealed class DavidAndGoliath : ILesson
             "\"The battle is the LORD's, and He saves not with sword and spear.\"",
         });
         _s.Hud.ShowCenter("Victory!\nDavid has defeated Goliath", 0f);
+        AudioManager.SetMusicMood(MusicMood.Hope); // the dread of the valley lifts into triumph
+        AudioManager.Play("fanfare");
     }
 
     // ---- terrain ----------------------------------------------------------

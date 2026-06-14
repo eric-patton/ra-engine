@@ -142,8 +142,12 @@ public static class SoundBank
     public static Dictionary<string, Clip> BuildAll()
     {
         var d = BuildSfx();
-        d["music"] = BuildMusic();
-        d["ambience"] = BuildAmbience();
+        d["music_Calm"]   = BuildMusic(MusicMood.Calm);
+        d["music_Hope"]   = BuildMusic(MusicMood.Hope);
+        d["music_Solemn"] = BuildMusic(MusicMood.Solemn);
+        d["amb_day"]   = BuildAmbienceDay();
+        d["amb_night"] = BuildAmbienceNight();
+        d["amb_rain"]  = BuildAmbienceRain();
         return d;
     }
 
@@ -271,32 +275,49 @@ public static class SoundBank
     }
 
     // -----------------------------------------------------------------------
-    //  Music: a calm I–V–vi–IV harp arpeggio over a soft low pad (D major).
+    //  Music: a four-chord harp arpeggio over a soft low pad, per mood.
     // -----------------------------------------------------------------------
 
-    public static Clip BuildMusic()
+    public static Clip BuildMusic(MusicMood mood) => mood switch
     {
-        const double bpm = 72;
-        double beat = 60.0 / bpm;          // seconds per quarter note
-        double loop = beat * 16;           // four bars of 4/4
-        var b = Buf(loop);
-
-        // Four chords, each a four-note ascending arpeggio (quarter notes), with a
-        // sustained root pad an octave down. MIDI note numbers.
-        int[][] chords =
+        // brighter, faster, major — uplift / victory
+        MusicMood.Hope => BuildMusicMood(new[]
+        {
+            new[] { 67, 71, 74, 79 }, // G  major  (I)
+            new[] { 62, 66, 69, 74 }, // D  major  (V)
+            new[] { 64, 67, 71, 76 }, // E  minor  (vi)
+            new[] { 60, 64, 67, 72 }, // C  major  (IV)
+        }, bpm: 88),
+        // slow, minor, low — tension / lament
+        MusicMood.Solemn => BuildMusicMood(new[]
+        {
+            new[] { 62, 65, 69, 74 }, // D  minor  (i)
+            new[] { 57, 60, 64, 69 }, // A  minor  (v)
+            new[] { 58, 62, 65, 70 }, // B-flat major (VI)
+            new[] { 55, 58, 62, 67 }, // G  minor  (iv)
+        }, bpm: 58),
+        // calm, gentle D-major — the Eden default
+        _ => BuildMusicMood(new[]
         {
             new[] { 62, 66, 69, 74 }, // D  major  (I)
             new[] { 57, 61, 64, 69 }, // A  major  (V)
             new[] { 59, 62, 66, 71 }, // B  minor  (vi)
             new[] { 55, 59, 62, 67 }, // G  major  (IV)
-        };
+        }, bpm: 72),
+    };
 
-        for (int c = 0; c < 4; c++)
+    private static Clip BuildMusicMood(int[][] chords, double bpm)
+    {
+        double beat = 60.0 / bpm;                 // seconds per quarter note
+        double loop = beat * 4 * chords.Length;   // four beats per chord
+        var b = Buf(loop);
+
+        // Each chord = a four-note ascending arpeggio (quarter notes) over a
+        // sustained root pad an octave down. MIDI note numbers.
+        for (int c = 0; c < chords.Length; c++)
         {
             double t0 = c * beat * 4;
-            // low pad (root, one octave below the arpeggio's root)
             Pad(b, t0, beat * 4, Midi(chords[c][0] - 12), 0.12, beat * 0.15, beat * 0.6);
-            // arpeggio: one note per beat, each ringing into the next
             for (int n = 0; n < 4; n++)
                 Perc(b, t0 + n * beat, beat * 1.6, Midi(chords[c][n]), Midi(chords[c][n]),
                      0.26, Wave.Tri, beat * 0.7);
@@ -308,10 +329,11 @@ public static class SoundBank
     }
 
     // -----------------------------------------------------------------------
-    //  Ambience: gentle wind (gusting filtered brown noise) with sparse birdsong.
+    //  Ambience beds — crossfaded by time of day + weather (see AudioManager).
     // -----------------------------------------------------------------------
 
-    public static Clip BuildAmbience()
+    /// <summary>Daytime: gentle gusting wind with sparse birdsong.</summary>
+    public static Clip BuildAmbienceDay()
     {
         const double loop = 16.0;
         var b = Buf(loop);
@@ -320,21 +342,18 @@ public static class SoundBank
 
         // wind: brown noise, lowpassed, with a slow gust LFO whose cycles divide
         // the loop length evenly so it tiles seamlessly.
-        double brown = 0, lp = 0;
-        double gustCycles = 3; // whole cycles across the loop
+        double brown = 0, lp = 0, gustCycles = 3;
         for (int i = 0; i < n; i++)
         {
             double w = rng.White();
             brown = brown * 0.985 + w * 0.03;
-            double fc = 480;
-            double a = 1 - Math.Exp(-2 * Math.PI * fc / Rate);
+            double a = 1 - Math.Exp(-2 * Math.PI * 480 / Rate);
             lp += a * (brown - lp);
             double t = i / (double)Rate;
             double gust = 0.6 + 0.4 * Math.Sin(2 * Math.PI * gustCycles * t / loop);
             b[i] += (float)(lp * 4.0 * gust * 0.5);
         }
 
-        // a few soft bird chirps scattered through the loop (deterministic times)
         double[] chirpAt = { 2.3, 5.1, 9.7, 13.2 };
         foreach (double ct in chirpAt)
         {
@@ -343,6 +362,65 @@ public static class SoundBank
         }
 
         var clip = Done(b, peak: 0.6);
+        clip.Loop = true;
+        return clip;
+    }
+
+    /// <summary>Night: faint low wind, a steady cricket chorus, and a distant owl.</summary>
+    public static Clip BuildAmbienceNight()
+    {
+        const double loop = 8.0;
+        var b = Buf(loop);
+        int n = b.Length;
+        var rng = new Rng(0xC0FFEE);
+
+        double brown = 0, lp = 0;
+        for (int i = 0; i < n; i++)
+        {
+            double w = rng.White();
+            brown = brown * 0.985 + w * 0.03;
+            double a = 1 - Math.Exp(-2 * Math.PI * 300 / Rate);
+            lp += a * (brown - lp);
+            b[i] += (float)(lp * 4.0 * 0.28); // quieter than the daytime wind
+        }
+
+        // crickets: a chirp pair every half second (tiles evenly into the 8s loop)
+        for (double t = 0.15; t < loop - 0.05; t += 0.5)
+        {
+            Perc(b, t, 0.018, 4300, 4300, 0.09, Wave.Sine, 0.010);
+            Perc(b, t + 0.05, 0.018, 4300, 4300, 0.08, Wave.Sine, 0.010);
+        }
+
+        // a distant owl, twice
+        Perc(b, 2.0, 0.22, 380, 360, 0.14, Wave.Sine, 0.16);
+        Perc(b, 2.32, 0.22, 360, 340, 0.12, Wave.Sine, 0.16);
+
+        var clip = Done(b, peak: 0.5);
+        clip.Loop = true;
+        return clip;
+    }
+
+    /// <summary>Rain: a steady filtered-noise hiss with a couple of soft far rumbles.</summary>
+    public static Clip BuildAmbienceRain()
+    {
+        const double loop = 8.0;
+        var b = Buf(loop);
+        int n = b.Length;
+        var rng = new Rng(0x5A1175);
+
+        double lp = 0;
+        for (int i = 0; i < n; i++)
+        {
+            double w = rng.White();
+            double a = 1 - Math.Exp(-2 * Math.PI * 3200 / Rate);
+            lp += a * (w - lp);
+            b[i] += (float)(lp * 0.5);
+        }
+
+        Perc(b, 1.2, 1.4, 70, 45, 0.16, Wave.Sine, 0.6); // distant rumbles
+        Perc(b, 5.3, 1.5, 60, 40, 0.14, Wave.Sine, 0.7);
+
+        var clip = Done(b, peak: 0.55);
         clip.Loop = true;
         return clip;
     }
