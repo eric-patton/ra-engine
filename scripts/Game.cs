@@ -152,6 +152,12 @@ public partial class Game : Node3D
             case "--test-campaign":
                 RunCampaignTest();
                 break;
+            case "--test-jsonlesson":
+                RunJsonLessonTest();
+                break;
+            case "--lesson-jericho":
+                StartLesson(Lessons.LessonCatalog.Get("jericho"));
+                break;
             case "--menu":
             default:
                 ShowMainMenu();
@@ -560,6 +566,91 @@ public partial class Game : Node3D
 
         GD.Print($"[RA] campaign-test: creationUnlocked={creationUnlocked} davidLocked={davidLocked} " +
                  $"creationDone={creationDone} davidUnlocked={davidUnlocked} nextOk={nextOk}");
+        QuitSoon();
+    }
+
+    /// <summary>Headless: the JSON lesson loader builds Jericho's world, wires its quest from data,
+    /// and the quest drives to completion (talk, collect the trumpets, reach the gate).</summary>
+    private void RunJsonLessonTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var lesson = Lessons.LessonCatalog.Get("jericho");
+        bool inCatalog = lesson is Lessons.JsonLesson && lesson.Id == "jericho";
+
+        var session = new GameSession { Name = "Session", LessonId = "jericho" };
+        AddChild(session);
+        session.Setup(lesson.Spawn, creative: false, captureMouse: false);
+        lesson.Build(session);
+        var quest = lesson.BuildQuest(session);
+        if (quest != null) session.StartQuest(quest);
+        session.Player.InputEnabled = false;
+
+        // terrain interpreted from JSON: a wall cell is mud_brick, the gate is carved to air
+        ushort mud = Core.BlockRegistry.IdOf("mud_brick");
+        bool wallBuilt = session.World.GetBlockId(22, 3, 6) == mud;
+        bool gateOpen = session.World.GetBlockId(32, 1, 18) == 0;
+
+        // an NPC was spawned from JSON
+        bool joshua = false;
+        foreach (Node n in GetTree().GetNodesInGroup("npc"))
+            if (n is NpcSys.Npc npc && npc.NpcName == "Joshua") joshua = true;
+
+        bool completed = false;
+        session.QuestCompleted += _ => completed = true;
+
+        // drive the data-defined quest: talk (optional), collect 3 trumpets, reach the gate
+        session.Quest.OnTalk("Joshua");
+        ushort gold = Core.BlockRegistry.IdOf("gold_block");
+        foreach (var p in new[] { new Vector3I(28, 1, 40), new Vector3I(32, 1, 38), new Vector3I(36, 1, 40) })
+            if (session.World.GetBlockId(p) == gold) session.World.SetBlock(p, 0); // break = collect
+        bool collectOk = session.Quest.IsDone(1);
+        session.Quest.OnReach("the-gate");
+        bool allDone = session.Quest.AllDone;
+
+        GD.Print($"[RA] jsonlesson-test: inCatalog={inCatalog} wall={wallBuilt} gate={gateOpen} " +
+                 $"npc={joshua} collect={collectOk} allDone={allDone} completed={completed}");
+
+        // Coverage for the enemy/wake/defeat paths Jericho (peaceful) never exercises: two same-type
+        // UNNAMED dormant soldiers + a wake-all + a case-mismatched Defeat key, all from inline JSON.
+        const string inline = """
+            {
+              "id": "_enemytest", "title": "Enemy Test", "spawn": [8, 3, 8],
+              "terrain": [ { "op": "flat", "x0": 0, "x1": 16, "z0": 0, "z1": 16, "y": 0 } ],
+              "enemies": [
+                { "type": "soldier", "pos": [4, 1, 4], "dormant": true },
+                { "type": "soldier", "pos": [6, 1, 4], "dormant": true }
+              ],
+              "narrations": [ { "id": "edge", "pos": [8, 3, 8], "size": [6, 6, 6], "lines": ["Here they come."] } ],
+              "quest": {
+                "objectives": [
+                  { "kind": "reach", "key": "edge", "label": "Hold the line", "onComplete": { "wake": "*" } },
+                  { "kind": "defeat", "key": "Soldier", "count": 2, "label": "Rout the guards" }
+                ]
+              }
+            }
+            """;
+        var lesson2 = Lessons.JsonLesson.FromJson(inline, "inline-enemytest");
+        var s2 = new GameSession { Name = "Session2", LessonId = "_enemytest" };
+        AddChild(s2);
+        s2.Setup(lesson2.Spawn, creative: false, captureMouse: false);
+        lesson2.Build(s2);
+        var q2 = lesson2.BuildQuest(s2);
+        if (q2 != null) s2.StartQuest(q2);
+        s2.Player.InputEnabled = false;
+
+        var foes = new System.Collections.Generic.List<Combat.Enemy>();
+        foreach (Node n in s2.World.GetChildren())
+            if (n is Combat.Enemy en) foes.Add(en);
+        bool twoFoes = foes.Count == 2;
+        bool dormant = twoFoes && foes.TrueForAll(f => f.Target == null);
+
+        s2.Quest.OnReach("edge");                              // reach -> wake "*" (both soldiers)
+        bool wokeAll = twoFoes && foes.TrueForAll(f => f.Target != null);
+
+        foreach (var f in foes) f.TakeDamage(9999, s2.Player); // defeat both (key "Soldier" vs name "soldier")
+        bool defeatedAll = s2.Quest.IsDone(1) && s2.Quest.AllDone;
+
+        GD.Print($"[RA] jsonlesson-enemies: twoFoes={twoFoes} dormant={dormant} wokeAll={wokeAll} defeatedAll={defeatedAll}");
         QuitSoon();
     }
 

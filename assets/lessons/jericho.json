@@ -1,0 +1,93 @@
+{
+  // The Walls of Jericho (Joshua 6) — the first JSON-authored lesson.
+  // A teacher can copy this file, rename the "id", and reshape the story with no code.
+  // Block names come from the registry (grass, dirt, mud_brick, gold_block, sand, ...).
+  "id": "jericho",
+  "title": "The Walls of Jericho",
+  "subtitle": "Joshua 6 — march, and the walls fall",
+  "spawn": [32, 3, 52],
+  "time": "morning",
+  "mood": "solemn",
+  "mode": "build",          // build mode so the trumpets can be gathered (broken)
+  "disarm": true,           // a peaceful lesson — the battle is the LORD's, not the sword's
+
+  "intro": [
+    "After the death of Moses, Joshua led Israel across the Jordan.",
+    "Now Jericho was shut up tight, and the LORD said: the wall of the city shall fall down flat."
+  ],
+
+  "terrain": [
+    { "op": "flat", "x0": 0, "x1": 63, "z0": 0, "z1": 63, "y": 0 },
+    // a small hill out in the plain (shows the "mound" verb)
+    { "op": "mound", "x": 9, "z": 30, "r": 4, "h": 3 },
+    // the four walls of the city (a hollow square of mud brick, 5 high)
+    { "op": "fill", "from": [22, 1, 6],  "to": [42, 5, 6],  "block": "mud_brick" },
+    { "op": "fill", "from": [22, 1, 18], "to": [42, 5, 18], "block": "mud_brick" },
+    { "op": "fill", "from": [22, 1, 6],  "to": [22, 5, 18], "block": "mud_brick" },
+    { "op": "fill", "from": [42, 1, 6],  "to": [42, 5, 18], "block": "mud_brick" },
+    { "op": "clear", "from": [32, 1, 18], "to": [32, 2, 18] },   // the city gate
+    { "op": "hut", "at": [26, 1, 9], "w": 6, "d": 5, "h": 4 },   // a house within the walls
+    { "op": "line", "from": [32, 0, 40], "to": [32, 0, 20], "block": "sand" }, // the marched road
+    // three gold blocks stand in for the rams'-horn trumpets to gather
+    { "op": "set", "at": [28, 1, 40], "block": "gold_block" },
+    { "op": "set", "at": [32, 1, 38], "block": "gold_block" },
+    { "op": "set", "at": [36, 1, 40], "block": "gold_block" },
+    { "op": "tree", "at": [10, 1, 46], "height": 5 },
+    { "op": "tree", "at": [54, 1, 48], "height": 4 }
+  ],
+
+  "npcs": [
+    { "name": "Joshua", "pos": [32, 1, 49],
+      "robe": [0.55, 0.4, 0.6], "accent": [0.7, 0.62, 0.45],
+      "say": [
+        "The LORD has given Jericho into our hands.",
+        "Gather the trumpets of rams' horns, then march to the gate and shout."
+      ] },
+    { "name": "Rahab", "pos": [38, 1, 9],
+      "robe": [0.7, 0.3, 0.3], "accent": [0.6, 0.5, 0.4],
+      "say": [
+        "I hid your spies beneath the flax upon my roof.",
+        "Spare my house — the one with the scarlet cord in the window."
+      ] }
+  ],
+
+  "narrations": [
+    { "pos": [32, 2, 44], "size": [60, 6, 3],
+      "lines": [ "Seven priests with seven trumpets went before the ark of the LORD." ] },
+    { "id": "the-gate", "pos": [32, 3, 21], "size": [22, 8, 3], "once": true,
+      "lines": [
+        "You stand before the great gate of Jericho.",
+        "On the seventh day they compassed the city seven times."
+      ] }
+  ],
+
+  "quest": {
+    "objectives": [
+      { "kind": "talk", "key": "Joshua", "label": "Receive the LORD's command", "optional": true,
+        "onComplete": { "narrate": "Take up the trumpets, and follow the ark of the LORD." } },
+      { "kind": "collect", "block": "gold_block", "count": 3,
+        "label": "Gather the trumpets of rams' horns" },
+      { "kind": "reach", "key": "the-gate", "label": "March to the gate and shout",
+        "onComplete": {
+          "narrate": [
+            "And the people shouted with a great shout,",
+            "and the wall fell down flat, so the people went up into the city."
+          ],
+          "sound": "fanfare",
+          "fx": { "kind": "debris", "at": [32, 4, 18], "tint": [0.7, 0.62, 0.45], "count": 60 }
+        } }
+    ],
+    "onComplete": {
+      "narrate": [
+        "So the LORD was with Joshua,",
+        "and his fame was noised throughout all the land."
+      ],
+      "center": "Jericho has fallen\nThe LORD gave them the city",
+      "mood": "hope",
+      "sound": "fanfare",
+      "fx": { "kind": "sparkle", "at": [32, 8, 12], "tint": [1.0, 0.95, 0.6], "count": 48 }
+    }
+  },
+
+  "chapter": { "requires": ["david"], "order": 0 }
+}

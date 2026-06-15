@@ -580,7 +580,8 @@ public partial class GameSession : Node3D
     private bool HasEnemyType(string typeName)
     {
         foreach (Node n in GetTree().GetNodesInGroup("enemy"))
-            if (n is Enemy e && e.Type.Name == typeName) return true;
+            if (n is Enemy e && string.Equals(e.Type.Name, typeName, System.StringComparison.OrdinalIgnoreCase))
+                return true;
         return false;
     }
 

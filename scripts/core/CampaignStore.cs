@@ -14,11 +14,28 @@ public sealed record Chapter(ILesson Lesson, string[] Requires);
 /// locks nothing.</summary>
 public static class Campaign
 {
-    public static readonly IReadOnlyList<Chapter> Chapters = new[]
+    /// <summary>The two hand-authored chapters, then any JSON lesson that declares a "chapter"
+    /// block (sorted by its order, then id). Computed so dropping a JSON lesson into
+    /// res://assets/lessons extends the campaign with no code change.</summary>
+    public static IReadOnlyList<Chapter> Chapters
     {
-        new Chapter(LessonCatalog.Get("creation"), System.Array.Empty<string>()),
-        new Chapter(LessonCatalog.Get("david"), new[] { "creation" }),
-    };
+        get
+        {
+            var list = new List<Chapter>
+            {
+                new(LessonCatalog.Get("creation"), System.Array.Empty<string>()),
+                new(LessonCatalog.Get("david"), new[] { "creation" }),
+            };
+            var json = new List<JsonLesson>();
+            foreach (var l in LessonCatalog.List)
+                if (l is JsonLesson jl && jl.IsChapter) json.Add(jl);
+            json.Sort((a, b) => a.ChapterOrder != b.ChapterOrder
+                ? a.ChapterOrder.CompareTo(b.ChapterOrder)
+                : System.String.CompareOrdinal(a.Id, b.Id));
+            foreach (var jl in json) list.Add(new Chapter(jl, jl.ChapterRequires));
+            return list;
+        }
+    }
 
     public static Chapter For(string lessonId)
     {
@@ -30,8 +47,9 @@ public static class Campaign
     /// <summary>The next chapter's lesson id after <paramref name="lessonId"/>, or null.</summary>
     public static string NextAfter(string lessonId)
     {
-        for (int i = 0; i < Chapters.Count - 1; i++)
-            if (Chapters[i].Lesson.Id == lessonId) return Chapters[i + 1].Lesson.Id;
+        var chs = Chapters; // snapshot — the getter rebuilds the list each call
+        for (int i = 0; i < chs.Count - 1; i++)
+            if (chs[i].Lesson.Id == lessonId) return chs[i + 1].Lesson.Id;
         return null;
     }
 }

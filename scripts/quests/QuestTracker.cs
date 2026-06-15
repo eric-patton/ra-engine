@@ -53,7 +53,7 @@ public sealed class QuestTracker
         {
             var o = _objs[i];
             if (_done[i] || o.Kind != ObjectiveKind.Defeat) continue;
-            if (o.Key != null && o.Key != enemyTypeName) continue;
+            if (o.Key != null && !string.Equals(o.Key, enemyTypeName, System.StringComparison.OrdinalIgnoreCase)) continue;
             Advance(i);
             return;
         }
