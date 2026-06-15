@@ -33,6 +33,21 @@ public partial class GameSession : Node3D
     public System.Action ReturnToMenuRequested;
     private bool _wasFocused = true;
 
+    /// <summary>The id of the lesson driving this session (carried by QuestCompleted),
+    /// or null for the sandbox.</summary>
+    public string LessonId { get; set; }
+
+    /// <summary>The active objective tracker, or null when there is no quest.</summary>
+    public Quests.QuestTracker Quest { get; private set; }
+
+    // Session-level relays the quest tracker binds to. Routing through the session
+    // (rather than the spawned nodes) means a freed NPC/enemy/trigger is irrelevant —
+    // the tracker only ever holds a reference to this session.
+    [Signal] public delegate void NpcTalkedEventHandler(string npcName);
+    [Signal] public delegate void EnemyDefeatedEventHandler(string enemyTypeName);
+    [Signal] public delegate void PlayerReachedEventHandler(string triggerId);
+    [Signal] public delegate void QuestCompletedEventHandler(string lessonId);
+
     public Inventory Inventory { get; private set; }
     public bool Survival { get; private set; }
     private CraftingMenu _craft;
@@ -486,6 +501,7 @@ public partial class GameSession : Node3D
         var npc = _talkingNpc;
         _talkingNpc = null;
         npc?.EmitSignal(Npc.SignalName.Talked);
+        if (npc != null) EmitSignal(SignalName.NpcTalked, npc.NpcName);
     }
 
     /// <summary>Switch between block-building and weapon-combat interaction.</summary>
@@ -507,7 +523,72 @@ public partial class GameSession : Node3D
         var e = new Enemy { Type = type, Target = Player, Name = $"Enemy_{type.Name}" };
         World.AddChild(e);
         e.GlobalPosition = position;
+        e.Defeated += () => EmitSignal(SignalName.EnemyDefeated, type.Name);
         return e;
+    }
+
+    /// <summary>Build a narration trigger that also fires a quest "Reach" objective with
+    /// <paramref name="id"/> when the player first enters it. (Pure-flavour narration
+    /// can still use <see cref="RAEngine.World.NarrationTrigger.Create"/> directly.)</summary>
+    public RAEngine.World.NarrationTrigger AddTrigger(Vector3 pos, Vector3 size, string id, params string[] lines)
+    {
+        var t = RAEngine.World.NarrationTrigger.Create(pos, size, Narrator, lines);
+        t.Id = id;
+        t.Entered += () => EmitSignal(SignalName.PlayerReached, id);
+        World.AddChild(t);
+        return t;
+    }
+
+    /// <summary>Begin tracking a lesson's quest. Called after the lesson has built its
+    /// world, so arming block events here never counts terrain as player progress.</summary>
+    public void StartQuest(Quests.Quest quest)
+    {
+        if (quest == null || Quest != null) return; // one quest per session
+        Quest = new Quests.QuestTracker(this, quest);
+        ValidateQuest(quest);
+        NpcTalked += name => Quest.OnTalk(name);
+        EnemyDefeated += name => Quest.OnDefeat(name);
+        PlayerReached += id => Quest.OnReach(id);
+        World.BlockChanged += OnWorldBlockChanged;
+        World.EmitBlockChanges = true; // arm AFTER Build(): terrain is already laid down
+        Quest.Begin();
+    }
+
+    /// <summary>Emit QuestCompleted (called by the tracker, which is not a Node itself).</summary>
+    internal void NotifyQuestComplete() => EmitSignal(SignalName.QuestCompleted, LessonId ?? "");
+
+    private void OnWorldBlockChanged(Vector3I pos, int oldId, int newId, int cause)
+        => Quest?.OnBlockChanged((ushort)oldId, (ushort)newId);
+
+    /// <summary>Warn loudly if a Defeat/Reach objective names a target that does not
+    /// exist, so a typo fails visibly instead of an objective that never completes.</summary>
+    private void ValidateQuest(Quests.Quest quest)
+    {
+        foreach (var o in quest.Objectives)
+        {
+            if (o.Kind == Quests.ObjectiveKind.Defeat && o.Key != null && !HasEnemyType(o.Key))
+                GD.PushWarning($"[Quest] no spawned enemy of type '{o.Key}' for objective '{o.Label}'");
+            if (o.Kind == Quests.ObjectiveKind.Reach && o.Key != null && !HasTrigger(o.Key))
+                GD.PushWarning($"[Quest] no trigger with id '{o.Key}' for objective '{o.Label}'");
+            if ((o.Kind == Quests.ObjectiveKind.Break || o.Kind == Quests.ObjectiveKind.Place
+                 || o.Kind == Quests.ObjectiveKind.Collect)
+                && (!BlockRegistry.TryId(o.Key, out ushort bid) || bid == 0))
+                GD.PushWarning($"[Quest] block objective '{o.Label}' has no valid block name '{o.Key}'");
+        }
+    }
+
+    private bool HasEnemyType(string typeName)
+    {
+        foreach (Node n in GetTree().GetNodesInGroup("enemy"))
+            if (n is Enemy e && e.Type.Name == typeName) return true;
+        return false;
+    }
+
+    private bool HasTrigger(string id)
+    {
+        foreach (Node n in World.GetChildren())
+            if (n is RAEngine.World.NarrationTrigger t && t.Id == id) return true;
+        return false;
     }
 
     /// <summary>A landed hit flashes the screen red and kicks the camera, both scaled
@@ -528,5 +609,10 @@ public partial class GameSession : Node3D
             Fx.OnShake = null;
             Fx.OnFlash = null;
         }
+
+        // Drop the world-block subscription explicitly (World is freed in the same pass,
+        // but this keeps the tracker from being called into during teardown).
+        if (World != null && GodotObject.IsInstanceValid(World))
+            World.BlockChanged -= OnWorldBlockChanged;
     }
 }

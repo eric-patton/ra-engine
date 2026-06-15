@@ -9,6 +9,10 @@ public partial class NarrationTrigger : Area3D
 {
     [Signal] public delegate void EnteredEventHandler();
 
+    /// <summary>Optional identity, so a quest "Reach" objective can match this zone.
+    /// Null for pure-flavour narration triggers.</summary>
+    public string Id = null;
+
     public string[] Lines = System.Array.Empty<string>();
     public bool Once = true;
     public Narrator Narrator;

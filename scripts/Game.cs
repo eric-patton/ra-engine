@@ -146,6 +146,12 @@ public partial class Game : Node3D
             case "--test-menu":
                 RunMenuTest();
                 break;
+            case "--test-quest":
+                RunQuestTest();
+                break;
+            case "--test-campaign":
+                RunCampaignTest();
+                break;
             case "--menu":
             default:
                 ShowMainMenu();
@@ -203,7 +209,7 @@ public partial class Game : Node3D
         if (_session != null) { _session.QueueFree(); _session = null; }
         _saveName = null;
         ClearMenu();
-        _menu = new UI.MainMenu { Name = "MainMenu" };
+        _menu = new UI.MainMenu { Name = "MainMenu", Progress = Core.CampaignStore.Load() };
         _menu.OnPlayLesson = id => StartLesson(Lessons.LessonCatalog.Get(id));
         _menu.OnSandbox = ShowSaveMenu;
         _menu.OnQuit = () => GetTree().Quit();
@@ -329,12 +335,15 @@ public partial class Game : Node3D
     private GameSession StartLesson(Lessons.ILesson lesson)
     {
         ClearMenu();
-        _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
+        _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu, LessonId = lesson.Id };
         AddChild(_session);
         _session.Setup(lesson.Spawn, creative: false);
         if (lesson.TimeOfDay is float tod) _session.Env.SetFixedTime(tod);
         else _session.Env.SetCycle(true);
         lesson.Build(_session);
+        var quest = lesson.BuildQuest(_session);
+        if (quest != null) _session.StartQuest(quest);
+        _session.QuestCompleted += id => Core.CampaignStore.MarkComplete(id);
         _session.Hud.ShowBanner($"{lesson.Title}", 4f);
         Core.AudioManager.StartMusic();
         Core.AudioManager.StartAmbience();
@@ -345,10 +354,12 @@ public partial class Game : Node3D
     private async void RunLessonTest()
     {
         var lesson = Lessons.LessonCatalog.Get("david");
-        var session = new GameSession { Name = "Session" };
+        var session = new GameSession { Name = "Session", LessonId = "david" };
         AddChild(session);
         session.Setup(lesson.Spawn, creative: false, captureMouse: false);
         lesson.Build(session);
+        var quest = lesson.BuildQuest(session);
+        if (quest != null) session.StartQuest(quest);
         session.Player.InputEnabled = false;
 
         await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
@@ -391,10 +402,12 @@ public partial class Game : Node3D
     private async void RunCreationTest()
     {
         var lesson = Lessons.LessonCatalog.Get("creation");
-        var session = new GameSession { Name = "Session" };
+        var session = new GameSession { Name = "Session", LessonId = "creation" };
         AddChild(session);
         session.Setup(lesson.Spawn, creative: false, captureMouse: false);
         lesson.Build(session);
+        var quest = lesson.BuildQuest(session);
+        if (quest != null) session.StartQuest(quest);
         session.Player.InputEnabled = false;
 
         await ToSignal(GetTree().CreateTimer(1.0), SceneTreeTimer.SignalName.Timeout);
@@ -423,6 +436,131 @@ public partial class Game : Node3D
         GD.Print($"[RA] creation-test: animals={animals.Count} named={talked}");
         await Capture("res://_creation2.png", 0.3);
         GetTree().Quit(0);
+    }
+
+    /// <summary>Headless: the quest tracker advances on each event kind, dedupes repeat
+    /// talks, ignores terrain / non-player block writes, and fires QuestCompleted once.</summary>
+    private void RunQuestTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var session = new GameSession { Name = "Session", LessonId = "quest-test" };
+        AddChild(session);
+        session.Setup(new Vector3(8, 5, 8), creative: false, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, 0, 16, 0, 16, 0);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Player.InputEnabled = false;
+
+        // Terrain written BEFORE the quest arms must never surface as progress.
+        int preArmEmits = 0;
+        session.World.BlockChanged += (p, o, n, c) => preArmEmits++;
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        session.World.SetBlock(2, 1, 2, stone); // not armed yet -> silent
+        bool preArmSilent = preArmEmits == 0;
+
+        var quest = new Quests.Quest
+        {
+            Objectives = new[]
+            {
+                Quests.Quest.Talk("Jesse", "Talk to Jesse"),
+                Quests.Quest.TalkAny(3, "Name the animals"),
+                Quests.Quest.Defeat("Goliath", "Defeat Goliath"),
+                Quests.Quest.Reach("zone", "Reach the zone"),
+                Quests.Quest.Break("stone", 2, "Mine two stone"),
+                Quests.Quest.Place("definitely_not_a_block", 1, "Bad block key", optional: true),
+            },
+        };
+        int completedFires = 0;
+        session.QuestCompleted += _ => completedFires++;
+        session.StartQuest(quest);
+
+        session.Quest.OnTalk("Jesse");
+        bool talkOk = session.Quest.IsDone(0);
+
+        session.Quest.OnTalk("Lion");
+        session.Quest.OnTalk("Lion");   // duplicate name -> ignored
+        session.Quest.OnTalk("Ox");
+        session.Quest.OnTalk("Dove");
+        bool talkAnyOk = session.Quest.IsDone(1) && session.Quest.Progress(1) == 3;
+
+        session.Quest.OnDefeat("Soldier"); // wrong type -> ignored
+        session.Quest.OnDefeat("Goliath");
+        bool defeatOk = session.Quest.IsDone(2);
+
+        session.Quest.OnReach("elsewhere"); // wrong id -> ignored
+        session.Quest.OnReach("zone");
+        bool reachOk = session.Quest.IsDone(3);
+
+        // Armed player edits: a LessonBuild write does not count; breaking a stone does.
+        session.World.SetBlock(3, 1, 3, stone, cause: Core.BlockChangeCause.LessonBuild);
+        session.World.SetBlock(3, 1, 3, 0); // break #1
+        session.World.SetBlock(4, 1, 4, stone, cause: Core.BlockChangeCause.LessonBuild);
+        session.World.SetBlock(4, 1, 4, 0); // break #2
+        bool breakOk = session.Quest.IsDone(4) && session.Quest.Progress(4) >= 2;
+
+        // Breaking a non-stone block must NOT auto-complete the bad-key Place objective.
+        ushort dirt = Core.BlockRegistry.IdOf("dirt");
+        session.World.SetBlock(5, 1, 5, dirt, cause: Core.BlockChangeCause.LessonBuild);
+        session.World.SetBlock(5, 1, 5, 0);
+        bool badKeyGuarded = !session.Quest.IsDone(5);
+
+        bool allDone = session.Quest.AllDone; // true: the only incomplete objective (5) is optional
+
+        // Second quest: a deduped repeat key must fall through to a later same-key
+        // objective, and an incomplete OPTIONAL objective must not gate completion.
+        var session2 = new GameSession { Name = "Session2", LessonId = "quest-test-2" };
+        AddChild(session2);
+        session2.Setup(new Vector3(8, 5, 8), creative: false, captureMouse: false);
+        Core.WorldGen.FlatGround(session2.World, 0, 16, 0, 16, 0);
+        session2.World.MarkAllDirty();
+        session2.World.RebuildAllNow();
+        session2.Player.InputEnabled = false;
+
+        int completedFires2 = 0;
+        session2.QuestCompleted += _ => completedFires2++;
+        session2.StartQuest(new Quests.Quest
+        {
+            Objectives = new[]
+            {
+                Quests.Quest.TalkAny(2, "Name two"),
+                Quests.Quest.Talk("Jesse", "Talk to Jesse"),
+                Quests.Quest.Defeat("Goliath", "Optional foe", optional: true),
+            },
+        });
+        session2.Quest.OnTalk("Jesse"); // counts toward TalkAny (idx0)
+        session2.Quest.OnTalk("Jesse"); // deduped at idx0 -> must fall through to complete idx1
+        bool continueFix = session2.Quest.IsDone(1);
+        session2.Quest.OnTalk("Lion");  // completes TalkAny (idx0)
+        bool optionalOk = session2.Quest.AllDone && !session2.Quest.IsDone(2); // optional foe never defeated
+
+        GD.Print($"[RA] quest-test: preArmSilent={preArmSilent} talk={talkOk} talkAny={talkAnyOk} " +
+                 $"defeat={defeatOk} reach={reachOk} break={breakOk} badKeyGuarded={badKeyGuarded} " +
+                 $"allDone={allDone} completedFires={completedFires} continueFix={continueFix} " +
+                 $"optionalOk={optionalOk} completedFires2={completedFires2}");
+        QuitSoon();
+    }
+
+    /// <summary>Headless: campaign progress persists + reloads, and unlock walks Requires.</summary>
+    private void RunCampaignTest()
+    {
+        Core.CampaignStore.DeleteAll();
+        var fresh = Core.CampaignStore.Load();
+        bool creationUnlocked = fresh.IsUnlocked("creation"); // no prereqs
+        bool davidLocked = !fresh.IsUnlocked("david");        // requires creation
+
+        fresh.MarkComplete("creation");
+        Core.CampaignStore.Save(fresh);
+
+        var reloaded = Core.CampaignStore.Load();
+        bool creationDone = reloaded.IsComplete("creation");
+        bool davidUnlocked = reloaded.IsUnlocked("david");
+        bool nextOk = Core.Campaign.NextAfter("creation") == "david";
+
+        Core.CampaignStore.DeleteAll();
+
+        GD.Print($"[RA] campaign-test: creationUnlocked={creationUnlocked} davidLocked={davidLocked} " +
+                 $"creationDone={creationDone} davidUnlocked={davidUnlocked} nextOk={nextOk}");
+        QuitSoon();
     }
 
     private async void RunMenuTest()

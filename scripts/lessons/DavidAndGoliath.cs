@@ -3,6 +3,7 @@ using RAEngine.Combat;
 using RAEngine.Core;
 using RAEngine.Dialogue;
 using RAEngine.NpcSys;
+using RAEngine.Quests;
 using RAEngine.World;
 
 namespace RAEngine.Lessons;
@@ -17,23 +18,16 @@ public sealed class DavidAndGoliath : ILesson
     public Vector3 Spawn => new(32, 3, 52);
     public Core.MusicMood Mood => Core.MusicMood.Solemn; // the tension of the valley
 
-    private GameSession _s;
+    private Enemy _goliath;
 
     public void Build(GameSession session)
     {
-        _s = session;
         var w = session.World;
 
         BuildTerrain(w);
         w.MarkAllDirty();
         w.RebuildAllNow();
 
-        session.Hud.SetObjectives(new[]
-        {
-            "Speak with your father Jesse",
-            "Cross the valley to the battle line",
-            "Defeat Goliath with your sling",
-        });
         session.Narrator.ShowMany(new[]
         {
             "The Philistines gathered their armies for battle in the Valley of Elah.",
@@ -50,11 +44,6 @@ public sealed class DavidAndGoliath : ILesson
         };
         w.AddChild(jesse);
         jesse.GlobalPosition = new Vector3(30, 1, 49);
-        jesse.Talked += () =>
-        {
-            session.Hud.CompleteObjective(0);
-            session.Narrator.Show("Carry the provisions across the valley to your brothers at the battle line.");
-        };
 
         // --- Eliab (older brother, flavour) ---
         var eliab = new Npc
@@ -67,44 +56,49 @@ public sealed class DavidAndGoliath : ILesson
         w.AddChild(eliab);
         eliab.GlobalPosition = new Vector3(36, 1, 44);
 
-        // --- Goliath (dormant until the player crosses the line) ---
+        // --- Goliath (dormant until the player crosses the line — see BuildQuest) ---
         var giantType = EnemyType.Giant();
         giantType.Health = 160f;
-        var goliath = session.SpawnEnemy(giantType, new Vector3(32, 1, 14));
-        goliath.Target = null;
-        goliath.Defeated += () => Victory();
+        _goliath = session.SpawnEnemy(giantType, new Vector3(32, 1, 14));
+        _goliath.Target = null;
 
-        // --- battle-line trigger (wakes Goliath) ---
-        var line = NarrationTrigger.Create(new Vector3(32, 3, 26), new Vector3(64, 8, 3), session.Narrator,
+        // --- battle-line trigger: narration + a "Reach" objective that wakes Goliath ---
+        var line = session.AddTrigger(new Vector3(32, 3, 26), new Vector3(64, 8, 3), "battle-line",
             "Then Goliath of Gath came forward, towering above the valley floor.",
             "\"Am I a dog, that you come at me with sticks? Choose a man, and let him fight me!\"");
         line.Once = true;
-        w.AddChild(line);
-        line.Entered += () =>
-        {
-            session.Hud.CompleteObjective(1);
-            if (GodotObject.IsInstanceValid(goliath)) goliath.Target = session.Player;
-        };
 
-        // a gentler hint trigger by the brook
+        // a gentler hint trigger by the brook (pure flavour, no objective)
         var brook = NarrationTrigger.Create(new Vector3(32, 2, 33), new Vector3(64, 6, 2), session.Narrator,
             "David chose five smooth stones from the brook and put them in his shepherd's bag.");
         w.AddChild(brook);
     }
 
-    private void Victory()
+    public Quest BuildQuest(GameSession session) => new()
     {
-        if (_s == null) return;
-        _s.Hud.CompleteObjective(2);
-        _s.Narrator.ShowMany(new[]
+        Objectives = new[]
         {
-            "The stone sank into the giant's forehead, and Goliath fell to the earth.",
-            "\"The battle is the LORD's, and He saves not with sword and spear.\"",
-        });
-        _s.Hud.ShowCenter("Victory!\nDavid has defeated Goliath", 0f);
-        AudioManager.SetMusicMood(MusicMood.Hope); // the dread of the valley lifts into triumph
-        AudioManager.Play("fanfare");
-    }
+            // Optional: talking to Jesse sets the scene but, as in the original, was never
+            // required to win — crossing the valley and felling Goliath complete the lesson.
+            Quest.Talk("Jesse", "Speak with your father Jesse",
+                s => s.Narrator.Show("Carry the provisions across the valley to your brothers at the battle line."),
+                optional: true),
+            Quest.Reach("battle-line", "Cross the valley to the battle line",
+                s => { if (GodotObject.IsInstanceValid(_goliath)) _goliath.Target = s.Player; }),
+            Quest.Defeat("Goliath", "Defeat Goliath with your sling"),
+        },
+        OnComplete = s => // the dread of the valley lifts into triumph
+        {
+            s.Narrator.ShowMany(new[]
+            {
+                "The stone sank into the giant's forehead, and Goliath fell to the earth.",
+                "\"The battle is the LORD's, and He saves not with sword and spear.\"",
+            });
+            s.Hud.ShowCenter("Victory!\nDavid has defeated Goliath", 0f);
+            AudioManager.SetMusicMood(MusicMood.Hope);
+            AudioManager.Play("fanfare");
+        },
+    };
 
     // ---- terrain ----------------------------------------------------------
 

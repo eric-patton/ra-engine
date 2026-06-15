@@ -415,6 +415,16 @@ public partial class GameHud : CanvasLayer
 
     public void SetObjectives(System.Collections.Generic.IEnumerable<string> items)
     {
+        var list = new System.Collections.Generic.List<(string, bool)>();
+        foreach (string s in items) list.Add((s, false));
+        SetObjectivesWithState(list);
+    }
+
+    /// <summary>Rebuild the checklist while preserving each line's checked/green state.
+    /// The quest tracker calls this on every progress change, so refreshing a "(k/N)"
+    /// counter line never wipes the ticks on objectives already completed.</summary>
+    public void SetObjectivesWithState(System.Collections.Generic.IEnumerable<(string text, bool done)> items)
+    {
         foreach (Node c in _objectives.GetChildren()) c.QueueFree();
         _objLabels.Clear();
         _objText.Clear();
@@ -424,17 +434,18 @@ public partial class GameHud : CanvasLayer
         title.AddThemeColorOverride("font_outline_color", Colors.Black);
         title.AddThemeConstantOverride("outline_size", 4);
         _objectives.AddChild(title);
-        foreach (string s in items)
+        foreach (var (text, done) in items)
         {
-            var l = new Label { Text = "☐  " + s };
+            var l = new Label { Text = (done ? "☑  " : "☐  ") + text };
             l.AddThemeFontSizeOverride("font_size", 16);
             l.AddThemeColorOverride("font_outline_color", Colors.Black);
             l.AddThemeConstantOverride("outline_size", 4);
             l.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             l.CustomMinimumSize = new Vector2(272, 0);
+            if (done) l.Modulate = new Color(0.6f, 1f, 0.6f, 0.85f);
             _objectives.AddChild(l);
             _objLabels.Add(l);
-            _objText.Add(s);
+            _objText.Add(text);
         }
     }
 

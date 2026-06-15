@@ -3,6 +3,7 @@ using Godot;
 using RAEngine.Core;
 using RAEngine.Dialogue;
 using RAEngine.NpcSys;
+using RAEngine.Quests;
 using RAEngine.World;
 
 namespace RAEngine.Lessons;
@@ -19,8 +20,6 @@ public sealed class CreationGarden : ILesson
     public float? TimeOfDay => Core.EnvironmentController.Dawn; // the freshness of a new creation
 
     private GameSession _s;
-    private int _named;
-    private readonly HashSet<Npc> _namedSet = new();
 
     public void Build(GameSession session)
     {
@@ -34,11 +33,6 @@ public sealed class CreationGarden : ILesson
         session.SetMode(GameSession.Mode.Build); // peaceful: let them shape the garden too, no weapon
         session.Weapons.Equip(null);
 
-        session.Hud.SetObjectives(new[]
-        {
-            "Name the animals of the garden (0/3)",
-            "Cross the river to the Tree of Life",
-        });
         session.Narrator.ShowMany(new[]
         {
             "In the beginning God created the heavens and the earth.",
@@ -61,41 +55,34 @@ public sealed class CreationGarden : ILesson
         AddNarration(new Vector3(32, 2, 20), new Vector3(64, 6, 3),
             "Let the land bring forth living creatures. The man gave names to all of them.");
 
-        // reaching the Tree of Life completes the lesson
-        var treeTrigger = NarrationTrigger.Create(new Vector3(32, 3, 12), new Vector3(6, 8, 6), session.Narrator,
+        // reaching the Tree of Life is the lesson's goal — a "Reach" objective (see BuildQuest)
+        session.AddTrigger(new Vector3(32, 3, 12), new Vector3(6, 8, 6), "tree-of-life",
             "In the midst of the garden stood the Tree of Life.");
-        w.AddChild(treeTrigger);
-        treeTrigger.Entered += () =>
-        {
-            session.Hud.CompleteObjective(1);
-            session.Narrator.Show("And God saw everything that He had made, and behold, it was very good.");
-            session.Hud.ShowCenter("The Garden of Eden\nAnd it was very good.", 0f);
-            // celebrate reaching the Tree of Life: a fanfare and a shower of golden motes
-            Core.AudioManager.Play("fanfare");
-            Core.Fx.Burst(new Vector3(32, 11, 12), Core.FxKind.Sparkle, new Color(1f, 0.95f, 0.6f), 48);
-        };
     }
+
+    public Quest BuildQuest(GameSession session) => new()
+    {
+        Objectives = new[]
+        {
+            Quest.TalkAny(3, "Name the animals of the garden",
+                s => s.Narrator.Show("Adam gave names to all the animals of the field.")),
+            Quest.Reach("tree-of-life", "Cross the river to the Tree of Life",
+                s =>
+                {
+                    s.Narrator.Show("And God saw everything that He had made, and behold, it was very good.");
+                    s.Hud.ShowCenter("The Garden of Eden\nAnd it was very good.", 0f);
+                    // celebrate reaching the Tree of Life: a fanfare and a shower of golden motes
+                    Core.AudioManager.Play("fanfare");
+                    Core.Fx.Burst(new Vector3(32, 11, 12), Core.FxKind.Sparkle, new Color(1f, 0.95f, 0.6f), 48);
+                }),
+        },
+    };
 
     private void AddAnimal(VoxelWorld w, string name, Vector3 pos, Color fur, Color belly, DialogueData dlg)
     {
         var a = new Npc { NpcName = name, Beast = true, Skin = fur, Robe = belly, Dialogue = dlg };
         w.AddChild(a);
         a.GlobalPosition = pos;
-        a.Talked += () =>
-        {
-            if (!_namedSet.Add(a)) return; // count each animal once, not each chat
-            _named++;
-            _s.Hud.SetObjectives(new[]
-            {
-                $"Name the animals of the garden ({Mathf.Min(_named, 3)}/3)",
-                "Cross the river to the Tree of Life",
-            });
-            if (_named >= 3)
-            {
-                _s.Hud.CompleteObjective(0);
-                _s.Narrator.Show("Adam gave names to all the animals of the field.");
-            }
-        };
     }
 
     private void AddNarration(Vector3 pos, Vector3 size, params string[] lines)

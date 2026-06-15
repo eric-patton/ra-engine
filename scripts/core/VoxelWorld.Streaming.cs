@@ -355,7 +355,7 @@ public sealed partial class VoxelWorld : Node3D
             if (!WaterReaches(p)) continue;
             // SetBlock records the edit (persistence), remeshes, and re-seeds the
             // neighbours via the EnqueueWaterArea hook — that is the cascade.
-            SetBlock(p.X, p.Y, p.Z, _waterId);
+            SetBlock(p.X, p.Y, p.Z, _waterId, cause: BlockChangeCause.Script); // engine-driven, not a player edit
         }
     }
 

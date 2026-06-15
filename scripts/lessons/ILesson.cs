@@ -20,6 +20,11 @@ public interface ILesson
 
     /// <summary>Background music mood for this lesson. Default: Calm.</summary>
     Core.MusicMood Mood => Core.MusicMood.Calm;
+
+    /// <summary>The lesson's objectives, or null for free exploration. Built after
+    /// <see cref="Build"/> (and started by the host), so it can reference the NPCs,
+    /// enemies and triggers the lesson just spawned.</summary>
+    Quests.Quest BuildQuest(GameSession session) => null;
 }
 
 /// <summary>Catalogue of available lessons (used by the menu and CLI).</summary>

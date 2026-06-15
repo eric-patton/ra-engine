@@ -1,5 +1,6 @@
 using System;
 using Godot;
+using RAEngine.Core;
 using RAEngine.Lessons;
 
 namespace RAEngine.UI;
@@ -11,6 +12,10 @@ public partial class MainMenu : CanvasLayer
     public Action<string> OnPlayLesson;
     public Action OnSandbox;
     public Action OnQuit;
+
+    /// <summary>Campaign completion, used to mark finished chapters with a ✓. Set by
+    /// the host before the menu enters the tree; null is treated as nothing-complete.</summary>
+    public CampaignProgress Progress;
 
     private SettingsPanel _settings;
 
@@ -32,10 +37,14 @@ public partial class MainMenu : CanvasLayer
         box.AddChild(UiKit.Title("Block Worlds for Stories & Lessons", 22, new Color(0.85f, 0.88f, 0.95f)));
         box.AddChild(new Control { CustomMinimumSize = new Vector2(0, 20) });
 
-        foreach (var lesson in LessonCatalog.List)
+        // Campaign chapters, in order, with a ✓ on completed ones. Everything stays
+        // playable so a teacher can jump straight to any lesson in class.
+        foreach (var chapter in Campaign.Chapters)
         {
-            var b = UiKit.Button($"▶   {lesson.Title}");
-            string id = lesson.Id;
+            string id = chapter.Lesson.Id;
+            bool done = Progress?.IsComplete(id) ?? false;
+            var b = UiKit.Button($"{(done ? "✓" : "▶")}   {chapter.Lesson.Title}");
+            if (done) b.Modulate = new Color(0.72f, 1f, 0.72f);
             b.Pressed += () => OnPlayLesson?.Invoke(id);
             box.AddChild(b);
         }

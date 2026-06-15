@@ -6,6 +6,11 @@ using Godot;
 
 namespace RAEngine.Core;
 
+/// <summary>Why a block changed, so listeners can tell intentional player edits
+/// apart from terrain generation and engine-driven changes (water flow). Only
+/// <see cref="PlayerEdit"/> changes are surfaced as <see cref="VoxelWorld.BlockChanged"/>.</summary>
+public enum BlockChangeCause { Generation, LessonBuild, PlayerEdit, Script }
+
 /// <summary>The voxel world: a sparse grid of <see cref="Chunk"/>s with block
 /// get/set in world coordinates, neighbour-aware remeshing, and collision.
 ///
@@ -20,6 +25,17 @@ public sealed partial class VoxelWorld : Node3D
     public BlockTextures Textures { get; private set; }
     public Material WaterMaterial { get; private set; }
     private ushort _waterId;
+
+    /// <summary>Fired when a <see cref="BlockChangeCause.PlayerEdit"/> changes a cell,
+    /// but only while <see cref="EmitBlockChanges"/> is armed. The quest tracker uses
+    /// this for break/place/collect objectives. (ushort isn't Variant-marshalable, so
+    /// the ids cross as int.)</summary>
+    [Signal] public delegate void BlockChangedEventHandler(Vector3I pos, int oldId, int newId, int cause);
+
+    /// <summary>Off by default. A lesson's quest arms this AFTER its terrain is built,
+    /// so terrain writes never count as player progress. The streamed sandbox leaves
+    /// it off entirely (generation writes chunk arrays directly, never via SetBlock).</summary>
+    public bool EmitBlockChanges;
 
     private readonly Dictionary<Vector3I, Chunk> _chunks = new();
     private readonly HashSet<Vector3I> _dirty = new();
@@ -135,7 +151,8 @@ public sealed partial class VoxelWorld : Node3D
     public bool IsOpaque(Vector3I p) => BlockRegistry.Get(GetBlockId(p.X, p.Y, p.Z)).Opaque;
     public bool IsSolid(Vector3I p) => BlockRegistry.Get(GetBlockId(p.X, p.Y, p.Z)).Solid;
 
-    public void SetBlock(int x, int y, int z, ushort id, bool remesh = true)
+    public void SetBlock(int x, int y, int z, ushort id, bool remesh = true,
+        BlockChangeCause cause = BlockChangeCause.PlayerEdit)
     {
         var c = ChunkCoord(x, y, z);
         // In a streamed world every SetBlock is a player edit (generation writes
@@ -144,7 +161,12 @@ public sealed partial class VoxelWorld : Node3D
         if (_streaming) RecordEdit(c, x, y, z, id);
         var ch = GetOrCreate(c);
         int lx = Mod(x, Chunk.Size), ly = Mod(y, Chunk.Size), lz = Mod(z, Chunk.Size);
+        ushort prev = ch.GetLocal(lx, ly, lz);
         ch.SetLocal(lx, ly, lz, id);
+        // Surface only armed player edits, so quest objectives count breaking/placing
+        // by hand but never the terrain a lesson lays down or water reclaiming a hole.
+        if (EmitBlockChanges && cause == BlockChangeCause.PlayerEdit && prev != id)
+            EmitSignal(SignalName.BlockChanged, new Vector3I(x, y, z), (int)prev, (int)id, (int)cause);
         // Let water reclaim any space opened at/below sea level near it (and cascade
         // as new water cells appear). Seeding the edited cell + its 6 neighbours
         // covers both "dug a hole next to water" and "removed a wall holding it back".
@@ -160,7 +182,8 @@ public sealed partial class VoxelWorld : Node3D
         if (lz == Chunk.Size - 1) MarkDirty(c + new Vector3I(0, 0, 1));
     }
 
-    public void SetBlock(Vector3I p, ushort id, bool remesh = true) => SetBlock(p.X, p.Y, p.Z, id, remesh);
+    public void SetBlock(Vector3I p, ushort id, bool remesh = true,
+        BlockChangeCause cause = BlockChangeCause.PlayerEdit) => SetBlock(p.X, p.Y, p.Z, id, remesh, cause);
 
     // ---- chunk management -------------------------------------------------
 
