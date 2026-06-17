@@ -373,11 +373,18 @@ public partial class Game : Node3D
         fire.AddFire(new Vector3(31.5f, 3f, 102.5f), Core.FireKind.Brazier);
         fire.AddFire(new Vector3(31.5f, 4f, 106.5f), Core.FireKind.Altar);
 
-        // Phase 1 — particle dressing for the waterfall: lip churn, a falling sheet, base splash.
+        // Phase 1 — particle dressing for each drop of the tiered cascade (positions match the
+        // tiers in WorldGen.WaterfallCascade): lip churn, a falling sheet, splash + foam at each
+        // ledge, widening toward the base.
         world.AddChild(RAEngine.World.WaterfallFx.Build(
-            lipCenter: new Vector3(8f, 8.7f, 100f),
-            baseCenter: new Vector3(8f, 1f, 100.6f),
-            width: 5f, fallHeight: 8f, spillDir: Vector3.Back));
+            lipCenter: new Vector3(8f, 12.2f, 95.2f), baseCenter: new Vector3(8f, 8.4f, 95.8f),
+            width: 5f, fallHeight: 4f, spillDir: Vector3.Back));
+        world.AddChild(RAEngine.World.WaterfallFx.Build(
+            lipCenter: new Vector3(8f, 8.2f, 98.2f), baseCenter: new Vector3(8f, 4.4f, 98.8f),
+            width: 7f, fallHeight: 4f, spillDir: Vector3.Back));
+        world.AddChild(RAEngine.World.WaterfallFx.Build(
+            lipCenter: new Vector3(8f, 4.2f, 101.2f), baseCenter: new Vector3(8f, 0.8f, 102.2f),
+            width: 9f, fallHeight: 4f, spillDir: Vector3.Back));
 
         // Label each station with a readable wooden sign (walk up and press E to read).
         void Sign(float x, float y, float z, string title, string body) =>
@@ -412,7 +419,7 @@ public partial class Game : Node3D
         Sign(17, 1, 79, "Landing Dust",
             "Climb the four steps onto the platform, then jump off the north edge — "
             + "you land in a puff of dust scaled to how far you fell.");
-        Sign(13, 1, 103, "Rivers & Waterfall",
+        Sign(15, 1, 106, "Rivers & Waterfall",
             """
             Water that moves. The source pool spills over the lip and pours down a
             falling curtain into the catch pool below, throwing up a fine mist.

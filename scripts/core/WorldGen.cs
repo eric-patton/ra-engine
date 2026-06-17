@@ -204,39 +204,10 @@ public static class WorldGen
         w.SetBlock(31, 2, 106, stoneBrick, false);
         w.SetBlock(31, 3, 106, altarFire, false);              // altar coals (emissive block)
 
-        // Water FX station (Phase 1): a tall cliff source pours a falling curtain into a big
-        // catch pool. The falling-water look comes from the water shader (bold whitewater on the
-        // fall faces) + WaterfallFx particles (lip churn, a falling sheet, a big base splash)
-        // spawned in Game.StartShowcase. Built from static water — the mesher derives the
-        // flow/fall channels from the geometry.
-        // Cliff body (x5..11, z95..99) with a walled top rim so the source pool stays calm
-        // and only the south lip (z99) spills over.
-        for (int x = 5; x <= 11; x++)
-            for (int z = 95; z <= 99; z++)
-                for (int y = 1; y <= 7; y++)
-                    w.SetBlock(x, y, z, stone, false);
-        for (int x = 5; x <= 11; x++)
-            w.SetBlock(x, 8, 95, stone, false);                 // back rim
-        for (int z = 96; z <= 99; z++)
-        {
-            w.SetBlock(5, 8, z, stone, false);                  // side rims (incl. curtain-top sides)
-            w.SetBlock(11, 8, z, stone, false);
-        }
-        for (int x = 6; x <= 10; x++)                           // calm source pool, open only south
-            for (int z = 96; z <= 98; z++)
-                w.SetBlock(x, 8, z, water, false);
-        for (int x = 6; x <= 10; x++)                           // tall falling curtain (8 high)
-            for (int y = 1; y <= 8; y++)
-                w.SetBlock(x, y, 99, water, false);
-        for (int x = 3; x <= 13; x++)                           // big catch pool: stone floor + sand rim
-            for (int z = 100; z <= 106; z++)
-            {
-                w.SetBlock(x, -1, z, stone, false);
-                w.SetBlock(x, 0, z, sand, false);
-            }
-        for (int x = 4; x <= 12; x++)                           // pooled water
-            for (int z = 100; z <= 105; z++)
-                w.SetBlock(x, 0, z, water, false);
+        // Water FX station (Phase 1): a tiered, widening waterfall cascade — a source pool spills
+        // down successive ledges, fanning out to a wide base pool. Voxel whitewater comes from the
+        // water shader; per-drop lip/splash/foam particles are added in Game.StartShowcase.
+        WaterfallCascade(w);
 
         // Flowing-river demo (B1): a stepped cascade that descends SOUTH toward the player so
         // every cell has a downstream drop — the flow heuristic needs a gradient to read as a
@@ -275,6 +246,61 @@ public static class WorldGen
         Tree(w, new Vector3I(30, 1, 46));
         Tree(w, new Vector3I(16, 1, 34));
         Tree(w, new Vector3I(36, 1, 38));
+    }
+
+    /// <summary>The showcase waterfall: a tiered, widening, forward-stepping cascade. A source
+    /// pool spills down successive ledges (each lower, wider, and further toward the player) into
+    /// a wide base pool, carved into a back cliff with stone banks. Each ledge is a stone shelf
+    /// holding a 1-deep pool; the drop between ledges is a water curtain. The blocky whitewater
+    /// look is the water shader; per-drop lip/splash/foam particles are added by WaterfallFx in
+    /// Game.StartShowcase (positions match the tiers here).</summary>
+    public static void WaterfallCascade(VoxelWorld w)
+    {
+        ushort stone = BlockRegistry.IdOf("stone");
+        ushort water = BlockRegistry.IdOf("water");
+
+        // Each tier: xMin, xMax, zMin, zMax, ySurf (water-surface Y). Lower tiers are wider and
+        // further south (+z, toward the player), so the cascade fans outward as it descends.
+        int[,] tiers =
+        {
+            { 6, 10,  92,  94, 12 }, // source pool
+            { 5, 11,  95,  97,  8 }, // ledge 1
+            { 4, 12,  98, 100,  4 }, // ledge 2
+            { 3, 13, 101, 107,  0 }, // base pool (widest)
+        };
+
+        // Back cliff so the cascade reads as carved into a hillside, not floating.
+        for (int x = 2; x <= 14; x++)
+            for (int z = 90; z <= 91; z++)
+                for (int y = 1; y <= 13; y++)
+                    w.SetBlock(x, y, z, stone, false);
+
+        int pXMin = 0, pXMax = 0, pY = 0;
+        for (int t = 0; t < tiers.GetLength(0); t++)
+        {
+            int xMin = tiers[t, 0], xMax = tiers[t, 1], zMin = tiers[t, 2], zMax = tiers[t, 3], ySurf = tiers[t, 4];
+            int floorY = ySurf == 0 ? -1 : 1;
+
+            // Stone shelf under the pool, with side banks one block higher to frame it.
+            for (int x = xMin - 1; x <= xMax + 1; x++)
+                for (int z = zMin; z <= zMax; z++)
+                {
+                    int top = (x < xMin || x > xMax) ? ySurf : ySurf - 1; // banks vs pool floor
+                    for (int y = floorY; y <= top; y++)
+                        w.SetBlock(x, y, z, stone, false);
+                }
+            // Pool water sitting on the shelf.
+            for (int x = xMin; x <= xMax; x++)
+                for (int z = zMin; z <= zMax; z++)
+                    w.SetBlock(x, ySurf, z, water, false);
+            // Curtain falling from the previous (narrower) tier into this pool's back edge.
+            if (t > 0)
+                for (int x = pXMin; x <= pXMax; x++)
+                    for (int y = ySurf + 1; y <= pY; y++)
+                        w.SetBlock(x, y, zMin, water, false);
+
+            pXMin = xMin; pXMax = xMax; pY = ySurf;
+        }
     }
 
     /// <summary>A simple tree: a log trunk with a blobby leaf canopy.</summary>
