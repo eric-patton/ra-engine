@@ -5,7 +5,7 @@ using RAEngine.UI;
 namespace RAEngine.World;
 
 /// <summary>Hotkey driver for the FX showcase world (built by <see cref="WorldGen.FxShowcase"/>):
-/// cycle weather, time-of-day and the bloom/glow preset on demand so a viewer can see every
+/// cycle weather, time-of-day, the bloom/glow preset and ambient-life density so a viewer can see every
 /// effect without waiting for the day cycle or for weather to roll in. Added only by the
 /// <c>--showcase</c> entry, so it never affects normal play.</summary>
 public sealed partial class ShowcaseController : Node
@@ -13,8 +13,15 @@ public sealed partial class ShowcaseController : Node
     public EnvironmentController Env;
     public GameHud Hud;
     public FireController Fire;
+    public AmbientLifeDirector Ambient;
 
     private int _weather, _time, _glow, _palette;
+    private int _ambient = 2; // Off / Sparse / Normal / Lush; starts at Normal
+
+    private static readonly (string label, float scale)[] Ambients =
+    {
+        ("Off", 0f), ("Sparse", 0.5f), ("Normal", 1f), ("Lush", 1.6f),
+    };
 
     private static readonly Weather[] Weathers = { Weather.Clear, Weather.Rain, Weather.Snow };
 
@@ -60,6 +67,11 @@ public sealed partial class ShowcaseController : Node
                 _glow = (_glow + 1) % Glows.Length;
                 Env.SetGlowPreset(Glows[_glow].preset);
                 Hud?.ShowBanner($"Glow: {Glows[_glow].label}", 1.6f);
+                break;
+            case Key.L:
+                _ambient = (_ambient + 1) % Ambients.Length;
+                Ambient?.SetDensityScale(Ambients[_ambient].scale);
+                Hud?.ShowBanner($"Ambient life: {Ambients[_ambient].label}", 1.6f);
                 break;
             // H, not an F-key: F8 is the Godot editor's Stop shortcut, so it would kill
             // the game during editor playtesting. H ("hallow") is free in-game and out.

@@ -114,6 +114,9 @@ public partial class Game : Node3D
             case "--test-fx":
                 RunFxTest();
                 break;
+            case "--test-ambientlife":
+                RunAmbientLifeTest();
+                break;
             case "--test-ambient":
                 RunAmbientTest();
                 break;
@@ -393,6 +396,7 @@ public partial class Game : Node3D
               [F6]  cycle time of day
               [F7]  cycle the bloom / glow mood
               [H]   bless the fires (holy / forge / normal)
+              [L]   cycle ambient-life density (off / sparse / normal / lush)
               V       toggle fly
               Shift   sprint
 
@@ -434,16 +438,25 @@ public partial class Game : Node3D
         Sign(20, 1, 50, "Wind & Speed",
             "The grass leans and shimmers with the wind. Hold Shift to sprint — the view widens "
             + "(a FOV kick) and the vignette tightens for a sense of speed.");
+        Sign(14, 1, 32, "Ambient Life",
+            """
+            A living world. By day, butterflies flit over the meadow while pollen and
+            dandelion fluff drift on the breeze and birds cross the sky; leaves and blossom
+            shed near the trees; fish dart in the pond and now and then leap with a splash.
+            It all eases with the time of day, the weather and the wind.
+
+            Press [L] to cycle the density: sparse / normal / lush / off.
+            """);
         Sign(20, 1, 30, "Depth Haze",
             "Distant terrain fades into a soft atmospheric haze, giving the world a sense of scale. "
             + "Look north to the far ridge and compare it with the grass at your feet.");
 
         _session.AddChild(new RAEngine.World.ShowcaseController
         {
-            Name = "ShowcaseController", Env = _session.Env, Hud = _session.Hud, Fire = _session.Fire,
+            Name = "ShowcaseController", Env = _session.Env, Hud = _session.Hud, Fire = _session.Fire, Ambient = _session.Ambient,
         });
 
-        _session.Hud.ShowBanner("FX Showcase — walk to each sign and press E to read.   [F5] weather  [F6] time  [F7] glow", 8f);
+        _session.Hud.ShowBanner("FX Showcase — walk to each sign and press E to read.   [F5] weather  [F6] time  [F7] glow  [L] life", 8f);
     }
 
     /// <summary>A simple gallery of one pillar of every block type (the texture library),
@@ -490,6 +503,7 @@ public partial class Game : Node3D
         world.EnsureSpawnArea(spawn, radius: 2);
 
         _session.Env.SetWeatherFollow(_session.Player);
+        _session.Ambient?.SetGenerator(gen); // biome-aware ambient life in the streamed sandbox
         _session.AddChild(new Core.WeatherDirector
         {
             Name = "Weather", Generator = gen, Player = _session.Player, Env = _session.Env,
@@ -1743,6 +1757,33 @@ public partial class Game : Node3D
         await Capture("res://_fx_hurt.png", 0.05);
 
         GD.Print($"[RA] fx-test: captured debris + hurt flash (health={session.Player.Health:F0})");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Windowed smoke test for the ambient-life system (birds, butterflies, fish, plus the
+    /// leaf/pollen/petal/dandelion fields): build the showcase stage, stand at the Ambient Life
+    /// station (trees + pond) at full density and capture day + dusk so everything renders without
+    /// error. Run WINDOWED - the screenshot path waits on FramePostDraw (never fires --headless).</summary>
+    private async void RunAmbientLifeTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(12, 2, 33), creative: false, captureMouse: false);
+        Core.WorldGen.FxShowcase(session.World);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Ambient.SetDensityScale(1.6f);      // lush, so the test clearly exercises every effect
+        session.Player.Head.Rotation = new Vector3(-0.05f, 0, 0);
+
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+        await ToSignal(GetTree().CreateTimer(3.0), SceneTreeTimer.SignalName.Timeout); // let life populate
+        await Capture("res://_ambientlife_day.png", 0.0);
+
+        session.Env.SetFixedTime(Core.EnvironmentController.Dusk);
+        await ToSignal(GetTree().CreateTimer(2.5), SceneTreeTimer.SignalName.Timeout);
+        await Capture("res://_ambientlife_dusk.png", 0.0);
+
+        GD.Print("[RA] ambientlife-test: captured day + dusk ambient life");
         GetTree().Quit(0);
     }
 

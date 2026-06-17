@@ -241,6 +241,21 @@ public static class WorldGen
             for (int z = 51; z <= 53; z++)
                 w.SetBlock(x, 0, z, water, false);
 
+        // Ambient Life station: an open meadow with a small pond and a couple of trees, so the
+        // living world has somewhere to gather - birds and butterflies and dandelion/pollen by
+        // day, leaves and blossom by the trees, fish in the pond. Driven by AmbientLifeDirector.
+        for (int x = 4; x <= 9; x++)
+            for (int z = 31; z <= 36; z++)
+                w.SetBlock(x, 0, z, sand, false);
+        for (int x = 5; x <= 8; x++)
+            for (int z = 32; z <= 35; z++)
+            {
+                w.SetBlock(x, 0, z, water, false);
+                w.SetBlock(x, -1, z, water, false);
+            }
+        Tree(w, new Vector3I(11, 1, 33));
+        Tree(w, new Vector3I(7, 1, 29));
+
         // A few trees in the open field (ambience; future falling leaves).
         Tree(w, new Vector3I(8, 1, 42));
         Tree(w, new Vector3I(30, 1, 46));

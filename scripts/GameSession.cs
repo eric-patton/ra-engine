@@ -24,6 +24,7 @@ public partial class GameSession : Node3D
     public BuildEditor Editor { get; private set; }
     public WeaponController Weapons { get; private set; }
     public FireController Fire { get; private set; }
+    public AmbientLifeDirector Ambient { get; private set; }
     private HeldItem _held;
     public DialogueBox Dialogue { get; private set; }
     public Narrator Narrator { get; private set; }
@@ -157,6 +158,12 @@ public partial class GameSession : Node3D
         // showcase via Fire.AddFire.
         Fire = new FireController { Name = "FireController", Player = Player, Env = Env, World = World };
         AddChild(Fire);
+
+        // Living world: birds, butterflies, fish + drifting leaves/pollen/petals/dandelion, all
+        // tuned by biome, time, weather and wind around the player. Biome-aware once the streamed
+        // sandbox injects its generator (Game.StartSandbox); elsewhere it reads trees/water blocks.
+        Ambient = new AmbientLifeDirector { Name = "AmbientLife", Player = Player, Env = Env, World = World };
+        AddChild(Ambient);
 
         SetMode(creative ? Mode.Build : Mode.Adventure);
 
