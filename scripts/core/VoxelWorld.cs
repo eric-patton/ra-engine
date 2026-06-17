@@ -75,6 +75,11 @@ public sealed partial class VoxelWorld : Node3D
             PumpWaterFill(delta);
         }
         PumpMeshing();
+
+        // Advance the FX clock the ripple shader reads (runs in the showcase too, where
+        // streaming is off). One uniform write a frame; the ripple array is pushed on impact.
+        _fxTime += (float)delta;
+        if (WaterMaterial is ShaderMaterial sm) sm.SetShaderParameter("u_time", _fxTime);
     }
 
     // ---- async meshing pump -----------------------------------------------
@@ -269,6 +274,28 @@ public sealed partial class VoxelWorld : Node3D
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             };
         }
-        return new ShaderMaterial { Shader = shader };
+        // render_priority below the default 0 so translucent spray/foam particles reliably
+        // sort in front of the water surface instead of being hidden behind it (Godot 4
+        // Forward+ has no order-independent transparency; this is the documented workaround).
+        return new ShaderMaterial { Shader = shader, RenderPriority = -1 };
+    }
+
+    // ---- ripple rings (B13) -----------------------------------------------
+    // A CPU-side ring buffer of recent surface impacts, pushed to the shared water shader as
+    // a uniform array. The water fragment turns each into an expanding, fading normal ripple
+    // — so they appear only on water (never bleeding onto banks) and read as deformation.
+    private const int RippleSlots = 12;
+    private readonly Vector4[] _ripples = new Vector4[RippleSlots];
+    private int _rippleNext;
+    private float _fxTime;
+
+    /// <summary>Register a ripple at a world position. <paramref name="size"/> scales the
+    /// ring (≈ raindrop 0.3, footstep/stone 0.7, big splash 1.2) so impacts read at scale.</summary>
+    public void AddRipple(Vector3 pos, float size = 0.8f)
+    {
+        if (WaterMaterial is not ShaderMaterial sm) return;
+        _ripples[_rippleNext] = new Vector4(pos.X, pos.Z, _fxTime, Mathf.Max(size, 0.05f));
+        _rippleNext = (_rippleNext + 1) % RippleSlots;
+        sm.SetShaderParameter("ripples", _ripples);
     }
 }

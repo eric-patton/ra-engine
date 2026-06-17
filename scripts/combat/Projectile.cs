@@ -32,7 +32,7 @@ public partial class Projectile : Node3D
         {
             GlobalPosition = to;
             Fx.Burst(to, FxKind.Splash, new Color(0.74f, 0.87f, 1f), 16);
-            Fx.Ring(to, new Color(0.85f, 0.92f, 1f, 0.85f), 1.2f, 0.6f);
+            World.AddRipple(to, 0.6f); // smaller ripple for a thrown stone
             AudioManager.Play("splash");
             QueueFree();
             return;

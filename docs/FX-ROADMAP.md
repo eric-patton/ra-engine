@@ -619,14 +619,31 @@ errors). The approach piggy-backs on the existing mesh + flood-fill rather than 
   air, harder toward a drop) and a **falling-sheet flag** on vertical faces with water above (**B2**).
   Water-face greedy merging is *gated on these matching*, so a still pond stays one big quad (zero
   regression) while a river/curtain splits into the per-cell quads it needs.
-- **`assets/shaders/water.gdshader`** reads those channels: **B1** scrolls stylised (quantised) foam
-  crests along the current; **B2** pours quantised vertical foam streaks down a curtain, more opaque.
-- **`assets/shaders/ripple.gdshader`** + **`Fx.Ring()`** (a pooled flat decal driven by a `prog`
-  uniform) — **B13** expanding ripple rings, fired on player water-entry and projectile splash.
-- **B9** splash-on-entry: extended the player's existing splash with a ring, and added splash+ring when
-  a thrown projectile plops into water (`Projectile` now takes a `VoxelWorld` to detect liquid, since
-  water has no collider). Showcase waterfall has a hand-placed base **mist** (a persistent `GpuParticles3D`).
-- **Showcase:** new **Rivers & Waterfall** station — a walled cliff source pours a curtain into a catch pool.
+- **`assets/shaders/water.gdshader`** reads those channels and renders all motion through the NORMAL
+  (animated highlights), not bright additive patches: **B1** is a normal-based directional current
+  (advect noise along the flow vector) with thin, sparse, speed-gated foam; **B2** is an aperiodic
+  waterfall curtain (multi-layer vertically-scrolled `fbm` streaks + per-lane phase + domain warp,
+  `qstep`-banded) with a churning lip-foam band.
+- **B13** ripple rings live **inside the water shader** as an impact-uniform ring buffer
+  (`VoxelWorld.AddRipple` → `vec4 ripples[12]` + `u_time`): each impact perturbs the surface normal as
+  an expanding, fading, multi-crest ripple. Because it runs only on water fragments it never bleeds onto
+  banks (the old flat-decal `ripple.gdshader` did), reads as deformation not a shockwave, and scales by
+  an impact `size` (raindrop → tiny, stone → small, player → medium).
+- **B9** splash-on-entry: the player's splash + a sized ripple; a thrown projectile splashes + ripples
+  when it plops into water (`Projectile` takes a `VoxelWorld` to detect liquid — water has no collider).
+- **Particles:** the shared `Fx` billboard now uses a soft radial dot (no more hard squares); the
+  showcase waterfall mist sorts in front of the water (`render_priority`: water −1, spray +1) with
+  proximity-fade soft particles.
+- **Showcase:** a **Rivers & Waterfall** station (walled cliff source → curtain → catch pool + base mist)
+  and a **Flowing River** station (a stepped cascade descending toward the player so every cell has a
+  downstream gradient — the flow model needs a slope to read as a current; a flat channel reads still).
+
+**Playtest redesign (2026-06-17, web-researched — Cyanilux/CaptainProton42/Catlike Coding/Godot docs):**
+first pass read as a tiled "U-cup" curtain, big white flow blobs, a shockwave ripple that bled over the
+water edge, and spray hidden behind the water. Rebuilt per the research: fbm-streak curtain, normal-based
+flow, in-shader ripple ring buffer, soft + priority-sorted spray. Curtain bug-fixes: streaks now scroll
+**down** (sign flip), the **lip row falls** too (a face with a drop in front, not just water above) so the
+top isn't static, and that lip row gets a foam band so the surface→fall transition is a 2-block churn.
 
 **Deferred within the water batch (deliberately):**
 - **Generalised waterfall base spray** — the showcase mist is hand-placed; a generic "spray where a

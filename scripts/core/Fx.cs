@@ -31,15 +31,6 @@ public sealed partial class Fx : Node3D
     private Mesh _quad, _cube;
     private bool _hitStopped;
 
-    // Ripple rings (B13): a small pool of flat decals on the water surface, each driven
-    // by its own ShaderMaterial `prog` uniform so several rings can overlap independently.
-    private const int RingPool = 10;
-    private MeshInstance3D[] _rings;
-    private ShaderMaterial[] _ringMats;
-    private float[] _ringElapsed, _ringLife; // _ringLife <= 0 means the slot is idle
-    private int _ringNext;
-    private static Shader _rippleShader;
-
     public override void _Ready()
     {
         Instance = this;
@@ -68,52 +59,6 @@ public sealed partial class Fx : Node3D
             AddChild(p);
             _pool[i] = p;
         }
-
-        BuildRingPool();
-    }
-
-    /// <summary>A pool of flat ripple-ring decals (PlaneMesh + ripple.gdshader). Each ring
-    /// keeps its own material so overlapping rings animate independently. Skipped silently
-    /// if the shader is missing, so rings simply don't appear rather than crashing.</summary>
-    private void BuildRingPool()
-    {
-        _rippleShader ??= GD.Load<Shader>("res://assets/shaders/ripple.gdshader");
-        _rings = new MeshInstance3D[RingPool];
-        _ringMats = new ShaderMaterial[RingPool];
-        _ringElapsed = new float[RingPool];
-        _ringLife = new float[RingPool];
-        if (_rippleShader == null) return;
-
-        var plane = new PlaneMesh { Size = new Vector2(2f, 2f) }; // unit ring radius = 1 m at scale 1
-        for (int i = 0; i < RingPool; i++)
-        {
-            var mat = new ShaderMaterial { Shader = _rippleShader };
-            var mi = new MeshInstance3D
-            {
-                Name = $"Ring{i}",
-                Mesh = plane,
-                MaterialOverride = mat,
-                Visible = false,
-                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                ExtraCullMargin = 4f,
-            };
-            AddChild(mi);
-            _rings[i] = mi;
-            _ringMats[i] = mat;
-        }
-    }
-
-    public override void _Process(double delta)
-    {
-        if (_rings == null) return;
-        for (int i = 0; i < RingPool; i++)
-        {
-            if (_ringLife[i] <= 0f) continue;
-            _ringElapsed[i] += (float)delta;
-            float prog = _ringElapsed[i] / _ringLife[i];
-            if (prog >= 1f) { _ringLife[i] = 0f; _rings[i].Visible = false; continue; }
-            _ringMats[i].SetShaderParameter("prog", prog);
-        }
     }
 
     public override void _ExitTree()
@@ -127,12 +72,6 @@ public sealed partial class Fx : Node3D
     /// the kind's default) at <paramref name="pos"/>, tinted <paramref name="tint"/>.</summary>
     public static void Burst(Vector3 pos, FxKind kind, Color tint, int count = 0) =>
         Instance?.DoBurst(pos, kind, tint, count);
-
-    /// <summary>Bloom one expanding ripple ring (B13) flat on a surface at <paramref name="pos"/>
-    /// — water entry, a thrown stone's impact, rain later. <paramref name="radius"/> is the
-    /// final ring radius in metres; it fades out over <paramref name="life"/> seconds.</summary>
-    public static void Ring(Vector3 pos, Color tint, float radius = 1.6f, float life = 0.7f) =>
-        Instance?.DoRing(pos, tint, radius, life);
 
     /// <summary>Add camera-shake trauma (0..1). Forwarded to the session's shaker.</summary>
     public static void Shake(float trauma) => OnShake?.Invoke(trauma);
@@ -205,21 +144,6 @@ public sealed partial class Fx : Node3D
         p.Restart(); // replay the one-shot from t=0 (also sets Emitting = true)
     }
 
-    private void DoRing(Vector3 pos, Color tint, float radius, float life)
-    {
-        if (_rings == null || _rippleShader == null || life <= 0f) return;
-        int i = _ringNext;
-        _ringNext = (_ringNext + 1) % RingPool;
-        var ring = _rings[i];
-        ring.GlobalPosition = pos + new Vector3(0f, 0.02f, 0f); // just above the surface, no z-fight
-        ring.Scale = new Vector3(radius, 1f, radius);
-        _ringMats[i].SetShaderParameter("ring_color", tint);
-        _ringMats[i].SetShaderParameter("prog", 0f);
-        ring.Visible = true;
-        _ringElapsed[i] = 0f;
-        _ringLife[i] = life;
-    }
-
     private void DoHitStop(float seconds)
     {
         if (_hitStopped) return;
@@ -240,11 +164,30 @@ public sealed partial class Fx : Node3D
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             VertexColorUseAsAlbedo = true,
-            BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            AlbedoTexture = SoftDot(),          // soft round falloff so puffs aren't hard squares
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
             BillboardKeepScale = true,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         });
         return mesh;
+    }
+
+    /// <summary>A soft white radial dot (opaque centre fading to transparent at the rim) used
+    /// as the particle billboard texture so bursts read as soft puffs, not hard squares.</summary>
+    public static Texture2D SoftDot()
+    {
+        var grad = new Gradient();
+        grad.SetColor(0, new Color(1f, 1f, 1f, 1f));
+        grad.SetColor(1, new Color(1f, 1f, 1f, 0f));
+        return new GradientTexture2D
+        {
+            Gradient = grad,
+            Width = 64,
+            Height = 64,
+            Fill = GradientTexture2D.FillEnum.Radial,
+            FillFrom = new Vector2(0.5f, 0.5f),
+            FillTo = new Vector2(1f, 0.5f),
+        };
     }
 
     private static Mesh MakeCube()

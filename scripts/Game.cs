@@ -417,6 +417,12 @@ public partial class Game : Node3D
             Watch the lip: the surface streams in the direction it flows (foam crests
             ride the current). Jump into the catch pool for a splash and a ripple ring.
             """);
+        Sign(16, 1, 49, "Flowing River",
+            """
+            A stepped mountain stream descending toward you. Watch the surface — the
+            current streams downhill (the highlights and foam ride the flow direction),
+            and each little drop churns into the pool at the foot.
+            """);
         Sign(6, 1, 66, "Water", "Jump into the pool for a splash and a ripple.");
         Sign(33, 1, 61, "Bloom / Glow",
             "These lamps emit light that blooms. Press [F7] to cycle the glow mood — Divine makes "
@@ -441,7 +447,7 @@ public partial class Game : Node3D
     private static GpuParticles3D MakeWaterfallSpray(Vector3 pos)
     {
         var grad = new Gradient();
-        grad.SetColor(0, new Color(0.92f, 0.96f, 1f, 0.5f));
+        grad.SetColor(0, new Color(0.92f, 0.96f, 1f, 0.45f));
         grad.SetColor(1, new Color(0.92f, 0.96f, 1f, 0f)); // fade out over life
         var quad = new QuadMesh { Size = new Vector2(0.5f, 0.5f) };
         quad.SurfaceSetMaterial(0, new StandardMaterial3D
@@ -449,28 +455,40 @@ public partial class Game : Node3D
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             VertexColorUseAsAlbedo = true,
-            BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            AlbedoTexture = Core.Fx.SoftDot(),                 // soft round mist, not hard squares
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
             BillboardKeepScale = true,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            RenderPriority = 1,                                // draw after the water (priority -1)
+            ProximityFadeEnabled = true,                       // soft-particle fade at the water/rock seam
+            ProximityFadeDistance = 0.6f,
         });
+        // Grow each puff over its life so it disperses like mist.
+        var scaleCurve = new Curve();
+        scaleCurve.AddPoint(new Vector2(0f, 0.5f));
+        scaleCurve.AddPoint(new Vector2(1f, 1.4f));
         return new GpuParticles3D
         {
             Name = "WaterfallSpray",
             Position = pos,
-            Amount = 26,
-            Lifetime = 1.2,
+            Amount = 30,
+            Lifetime = 1.3,
             DrawPass1 = quad,
             ProcessMaterial = new ParticleProcessMaterial
             {
                 EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
                 EmissionBoxExtents = new Vector3(2.4f, 0.1f, 0.4f),
                 Direction = Vector3.Up,
-                Spread = 36f,
-                InitialVelocityMin = 1.1f,
-                InitialVelocityMax = 2.7f,
-                Gravity = new Vector3(0, -3.2f, 0),
-                ScaleMin = 0.6f,
-                ScaleMax = 1.5f,
+                Spread = 38f,
+                InitialVelocityMin = 1.0f,
+                InitialVelocityMax = 2.6f,
+                Gravity = new Vector3(0, -3.0f, 0),
+                ScaleMin = 0.7f,
+                ScaleMax = 1.6f,
+                ScaleCurve = new CurveTexture { Curve = scaleCurve },
+                TurbulenceEnabled = true,
+                TurbulenceNoiseStrength = 1.4f,
+                TurbulenceNoiseScale = 1.6f,
                 ColorRamp = new GradientTexture1D { Gradient = grad },
             },
         };

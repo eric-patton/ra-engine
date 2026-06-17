@@ -237,6 +237,38 @@ public static class WorldGen
             for (int z = 100; z <= 103; z++)
                 w.SetBlock(x, 0, z, water, false);
 
+        // Flowing-river demo (B1): a stepped cascade that descends SOUTH toward the player so
+        // every cell has a downstream drop — the flow heuristic needs a gradient to read as a
+        // current, and the water shader then streams directional foam down it. Stone staircase
+        // + side banks + a back wall at the spring + a catch pond at the foot.
+        int rx0 = 11, rx1 = 13;
+        for (int step = 0; step <= 6; step++)
+        {
+            int y = 6 - step, z = 44 + step;
+            for (int x = rx0; x <= rx1; x++)
+            {
+                w.SetBlock(x, y - 1, z, stone, false);          // step floor
+                w.SetBlock(x, y, z, water, false);              // water on the step
+            }
+            foreach (int bx in new[] { rx0 - 1, rx1 + 1 })       // side banks, one above the water
+            {
+                w.SetBlock(bx, y, z, stone, false);
+                w.SetBlock(bx, y + 1, z, stone, false);
+            }
+        }
+        for (int x = rx0 - 1; x <= rx1 + 1; x++)                 // back wall behind the spring
+            for (int y = 0; y <= 7; y++)
+                w.SetBlock(x, y, 43, stone, false);
+        for (int x = rx0 - 2; x <= rx1 + 2; x++)                 // catch pond at the foot
+            for (int z = 50; z <= 54; z++)
+            {
+                w.SetBlock(x, -1, z, stone, false);
+                w.SetBlock(x, 0, z, sand, false);
+            }
+        for (int x = rx0 - 1; x <= rx1 + 1; x++)
+            for (int z = 51; z <= 53; z++)
+                w.SetBlock(x, 0, z, water, false);
+
         // A few trees in the open field (ambience; future falling leaves).
         Tree(w, new Vector3I(8, 1, 42));
         Tree(w, new Vector3I(30, 1, 46));

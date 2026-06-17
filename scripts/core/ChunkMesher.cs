@@ -157,9 +157,15 @@ public static class ChunkMesher
                     {
                         if (nrm.Y > 0)                                       // top surface → river flow
                             ComputeFlow(snap, cell, out cB, out cA);
-                        else if (nrm.Y == 0 &&                               // vertical sheet with water above
-                                 BlockRegistry.Get(snap.Get(cell.X, cell.Y + 1, cell.Z)).Render == RenderType.Water)
-                            cA = 1f;                                         // → a waterfall curtain (B2)
+                        else if (nrm.Y == 0)                                 // vertical face → waterfall?
+                        {
+                            bool waterAbove = BlockRegistry.Get(snap.Get(cell.X, cell.Y + 1, cell.Z)).Render == RenderType.Water;
+                            // A "lip" cell pours over a brink: the cell in front (already air, or the
+                            // face wouldn't draw) also has air directly below it — a real drop.
+                            bool lip = snap.Get(cell.X + nrm.X, cell.Y - 1, cell.Z + nrm.Z) == 0;
+                            if (waterAbove) cA = 1f;                         // curtain body
+                            else if (lip) cA = 0.5f;                         // lip row: falls + foams over the brink
+                        }
                     }
                     cBArr[m] = cB;
                     cAArr[m] = cA;
