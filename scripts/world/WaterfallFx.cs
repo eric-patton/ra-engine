@@ -1,14 +1,12 @@
 using Godot;
-using RAEngine.Core;
 
 namespace RAEngine.World;
 
-/// <summary>Particle dressing that turns a flat water curtain into a believable waterfall:
-/// a churning spray line at the LIP (the tipping point), a falling-water SHEET down the face
-/// for volume, and a big SPLASH burst where it lands. All soft billboards that sort in front
-/// of the translucent water (render_priority) with proximity-fade so they melt into the pool.
-/// Hand-placed for the showcase today; reusable for any waterfall — give it the lip, the base,
-/// the width and the spill direction.</summary>
+/// <summary>Voxel particle dressing for a waterfall — small tumbling CUBES, matching the blocky
+/// aesthetic instead of soft round billboards: froth at the LIP (the tipping point), a falling
+/// SHEET of cubes down the face for volume, a chunky SPLASH where it lands, and translucent
+/// "BUBBLE" cubes that drift away from the base across the pool on the current. Reusable: give it
+/// the lip, the base, the width and the spill direction.</summary>
 public static class WaterfallFx
 {
     public static Node3D Build(Vector3 lipCenter, Vector3 baseCenter, float width, float fallHeight, Vector3 spillDir)
@@ -17,37 +15,44 @@ public static class WaterfallFx
         float hw = width * 0.5f;
         var root = new Node3D { Name = "WaterfallFx" };
 
-        // 1) Lip churn — a thin wide line at the brink throwing froth out over the edge.
+        // Lip froth — cubes tumbling over the brink.
         root.AddChild(Emitter("LipSpray", lipCenter,
             box: new Vector3(hw, 0.15f, 0.25f),
-            dir: (spillDir * 0.7f + Vector3.Down * 0.5f).Normalized(),
-            spread: 30f, vMin: 1.4f, vMax: 3.2f, gravity: -9f,
-            amount: 44, life: 0.85f, scaleMin: 0.4f, scaleMax: 1.0f,
-            peak: 0.7f, tint: new Color(0.96f, 0.98f, 1f)));
+            dir: (spillDir * 0.7f + Vector3.Down * 0.5f).Normalized(), spread: 30f,
+            vMin: 1.4f, vMax: 3.2f, gravity: -9f, spin: 220f,
+            amount: 40, life: 0.9f, sMin: 0.5f, sMax: 1.0f, peak: 0.9f,
+            tint: new Color(0.95f, 0.98f, 1f)));
 
-        // 2) Falling sheet — white droplets pouring down the face, giving the curtain volume.
+        // Falling sheet — cubes pouring down the face for volume.
         root.AddChild(Emitter("FallSheet", lipCenter.Lerp(baseCenter, 0.5f),
             box: new Vector3(hw, fallHeight * 0.5f, 0.16f),
-            dir: Vector3.Down, spread: 7f, vMin: 3.0f, vMax: 6.0f, gravity: -12f,
-            amount: 60, life: Mathf.Clamp(fallHeight / 6f, 0.7f, 1.5f),
-            scaleMin: 0.4f, scaleMax: 0.95f, peak: 0.5f, tint: new Color(0.85f, 0.92f, 1f)));
+            dir: Vector3.Down, spread: 8f, vMin: 3f, vMax: 6f, gravity: -12f, spin: 160f,
+            amount: 55, life: Mathf.Clamp(fallHeight / 6f, 0.7f, 1.5f),
+            sMin: 0.45f, sMax: 1.0f, peak: 0.8f, tint: new Color(0.86f, 0.93f, 1f)));
 
-        // 3) Base splash — a dense, energetic burst of mist where the sheet hits the pool.
+        // Base splash — a chunky burst where the sheet hits the pool.
         root.AddChild(Emitter("BaseSplash", baseCenter,
-            box: new Vector3(hw + 0.6f, 0.12f, 0.7f),
-            dir: Vector3.Up, spread: 60f, vMin: 2.4f, vMax: 5.2f, gravity: -8f,
-            amount: 100, life: 1.0f, scaleMin: 0.7f, scaleMax: 1.8f,
-            peak: 0.75f, tint: new Color(0.97f, 0.99f, 1f)));
+            box: new Vector3(hw + 0.5f, 0.12f, 0.6f),
+            dir: Vector3.Up, spread: 55f, vMin: 2.4f, vMax: 5.0f, gravity: -8f, spin: 260f,
+            amount: 80, life: 0.9f, sMin: 0.6f, sMax: 1.6f, peak: 0.95f,
+            tint: new Color(0.97f, 0.99f, 1f)));
+
+        // Drifting bubbles — translucent cubes carried away across the pool surface by the current.
+        root.AddChild(Emitter("Bubbles", baseCenter + spillDir * 1.1f + Vector3.Down * 0.2f,
+            box: new Vector3(hw + 0.8f, 0.1f, 0.5f),
+            dir: spillDir, spread: 34f, vMin: 0.5f, vMax: 1.4f, gravity: 0f, spin: 50f,
+            amount: 64, life: 2.6f, sMin: 0.35f, sMax: 0.7f, peak: 0.5f,
+            tint: new Color(0.88f, 0.95f, 1f)));
         return root;
     }
 
     private static GpuParticles3D Emitter(string name, Vector3 pos, Vector3 box, Vector3 dir,
-        float spread, float vMin, float vMax, float gravity, int amount, float life,
-        float scaleMin, float scaleMax, float peak, Color tint)
+        float spread, float vMin, float vMax, float gravity, float spin, int amount, float life,
+        float sMin, float sMax, float peak, Color tint)
     {
         var ramp = new Gradient();
         ramp.SetColor(0, new Color(tint, 0f));         // fade in from nothing
-        ramp.AddPoint(0.18f, new Color(tint, peak));   // quick rise to peak
+        ramp.AddPoint(0.18f, new Color(tint, peak));   // quick rise to peak alpha
         ramp.SetColor(1, new Color(tint, 0f));         // fade out over the rest of life
         return new GpuParticles3D
         {
@@ -55,7 +60,7 @@ public static class WaterfallFx
             Position = pos,
             Amount = amount,
             Lifetime = life,
-            DrawPass1 = Quad(),
+            DrawPass1 = Cube(),
             ProcessMaterial = new ParticleProcessMaterial
             {
                 EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
@@ -65,31 +70,29 @@ public static class WaterfallFx
                 InitialVelocityMin = vMin,
                 InitialVelocityMax = vMax,
                 Gravity = new Vector3(0, gravity, 0),
-                ScaleMin = scaleMin,
-                ScaleMax = scaleMax,
+                ScaleMin = sMin,
+                ScaleMax = sMax,
+                AngularVelocityMin = -spin,            // tumble the cubes (like break debris)
+                AngularVelocityMax = spin,
                 TurbulenceEnabled = true,
-                TurbulenceNoiseStrength = 1.3f,
-                TurbulenceNoiseScale = 1.5f,
+                TurbulenceNoiseStrength = 1.1f,
+                TurbulenceNoiseScale = 1.4f,
                 ColorRamp = new GradientTexture1D { Gradient = ramp },
             },
         };
     }
 
-    private static Mesh Quad()
+    /// <summary>A small tumbling water cube; per-particle vertex colour carries the tint + fade.
+    /// Alpha-blended and sorted in front of the water surface.</summary>
+    private static Mesh Cube()
     {
-        var mesh = new QuadMesh { Size = new Vector2(0.5f, 0.5f) };
+        var mesh = new BoxMesh { Size = new Vector3(0.22f, 0.22f, 0.22f) };
         mesh.SurfaceSetMaterial(0, new StandardMaterial3D
         {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             VertexColorUseAsAlbedo = true,
-            AlbedoTexture = Fx.SoftDot(),
-            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
-            BillboardKeepScale = true,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            RenderPriority = 2,                     // draw in front of the water (priority -1)
-            ProximityFadeEnabled = true,            // soft-particle melt into pool/rocks
-            ProximityFadeDistance = 0.5f,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            Roughness = 0.75f,
+            RenderPriority = 2,                        // draw in front of the water (priority -1)
         });
         return mesh;
     }
