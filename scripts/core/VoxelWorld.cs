@@ -72,7 +72,7 @@ public sealed partial class VoxelWorld : Node3D
         {
             UpdateStreaming();
             PumpGeneration();
-            PumpWaterFill();
+            PumpWaterFill(delta);
         }
         PumpMeshing();
     }

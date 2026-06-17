@@ -124,7 +124,7 @@ public sealed partial class VoxelWorld : Node3D
         _genQueue.Clear();
         while (_genResults.TryDequeue(out _)) { }
         _edits.Clear();
-        _waterFill.Clear();
+        _waterQueue.Clear();
         _waterQueued.Clear();
         _lastTargetChunk = new Vector3I(int.MinValue, 0, 0);
     }
@@ -317,18 +317,43 @@ public sealed partial class VoxelWorld : Node3D
     // shipping the resulting block edits from an authoritative server. Bounded above
     // by sea level and on the sides by solid walls, so a dig confines itself to the
     // reachable air pocket below the waterline.
+    //
+    // Pacing is TIME-based, not per-frame: a per-frame budget at 60 fps still drained
+    // small pits in a frame or two (looked instant). We advance WaterCellsPerStep cells
+    // every WaterStepSeconds instead, so the wave front is visibly gradual and frame-rate
+    // independent. The final filled state is identical regardless of pacing, so the
+    // multiplayer-replication guarantee above is unchanged.
+    //
+    // Depth-first priority: pending cells live in a single priority queue keyed by Y,
+    // so the LOWEST (deepest) reachable cell is always filled next. Water therefore pours
+    // straight down into the deepest pocket and fills it from the bottom up before it
+    // rises to higher cells — water "finding its level", and waterfalls for free (a cell
+    // with water directly above it is simply the lowest cell on the frontier). No RNG is
+    // used; the priority order is deterministic for a given sequence of edits.
 
-    private readonly Queue<Vector3I> _waterFill = new();
+    // Priority = the cell's world-Y; PriorityQueue serves the lowest (deepest) first, so
+    // the fill always advances bottom-up regardless of the order cells were discovered.
+    private readonly PriorityQueue<Vector3I, int> _waterQueue = new();
     private readonly HashSet<Vector3I> _waterQueued = new();
-    public int WaterFillPerFrame = 256;
+    // ~1 cell / 0.08 s ≈ 12.5 cells/s: deliberately gradual so the wave front is clearly
+    // visible (a stairway fills over a few seconds, a large sea over many). The final
+    // filled state is identical regardless of pacing.
+    public float WaterStepSeconds = 0.08f;
+    public int WaterCellsPerStep = 1;
+    private float _waterAccum;
 
     private void EnqueueWaterArea(int x, int y, int z)
     {
-        TryQueueWater(x, y, z);
+        // Seed the edited cell and its six neighbours. The priority queue orders them by
+        // depth, so the order we add them in does not matter — the deepest reachable cell
+        // is always served first. Seeding the edited cell itself (not just its neighbours)
+        // is what lets a single dig into a lake fill on that one edit alone, without a
+        // second nearby break to re-seed it.
+        TryQueueWater(x, y, z);          // the just-edited cell
+        TryQueueWater(x, y - 1, z);      // straight down
         TryQueueWater(x + 1, y, z);
         TryQueueWater(x - 1, y, z);
         TryQueueWater(x, y + 1, z);
-        TryQueueWater(x, y - 1, z);
         TryQueueWater(x, y, z + 1);
         TryQueueWater(x, y, z - 1);
     }
@@ -337,26 +362,46 @@ public sealed partial class VoxelWorld : Node3D
     {
         if (y > TerrainGenerator.SeaLevel) return; // water never climbs above sea level
         var p = new Vector3I(x, y, z);
-        if (_waterQueued.Add(p)) _waterFill.Enqueue(p);
+        if (!_waterQueued.Add(p)) return;
+        _waterQueue.Enqueue(p, y);                 // priority = depth: lowest Y is served first
     }
 
-    private void PumpWaterFill()
+    private void PumpWaterFill(double delta)
     {
-        int budget = WaterFillPerFrame;
-        while (budget-- > 0 && _waterFill.Count > 0)
+        // Time-based pacing so the wave front is actually visible. Accumulate real
+        // seconds; once a step elapses, advance a few cells. DrainWater always takes the
+        // lowest (deepest) pending cell, so the fill works strictly bottom-up.
+        _waterAccum += (float)delta;
+        if (_waterAccum < WaterStepSeconds) return;
+        _waterAccum = 0f;
+        DrainWater(WaterCellsPerStep);
+    }
+
+    /// <summary>Test hook: synchronously fill up to <paramref name="maxCells"/> water cells
+    /// from the pending queue, bypassing the time-based pacing, and return how many were
+    /// placed. Lets tests assert the deterministic bottom-up fill ORDER, which the
+    /// time-amortised pump cannot expose deterministically.</summary>
+    public int DrainWaterForTest(int maxCells) => DrainWater(maxCells);
+
+    private int DrainWater(int budget)
+    {
+        int placed = 0;
+        while (placed < budget && _waterQueue.Count > 0)
         {
-            var p = _waterFill.Dequeue();
+            var p = _waterQueue.Dequeue();         // lowest Y first
             _waterQueued.Remove(p);
             if (p.Y > TerrainGenerator.SeaLevel) continue;
             // Only act inside generated chunks, so the fill never conjures terrain
             // into not-yet-streamed space; the front simply pauses at the boundary.
             if (!_generated.Contains(ChunkCoord(p.X, p.Y, p.Z))) continue;
             if (GetBlockId(p.X, p.Y, p.Z) != 0) continue; // only fill air
-            if (!WaterReaches(p)) continue;
+            if (!WaterReaches(p)) continue;               // re-seeded later when a neighbour fills
             // SetBlock records the edit (persistence), remeshes, and re-seeds the
             // neighbours via the EnqueueWaterArea hook — that is the cascade.
             SetBlock(p.X, p.Y, p.Z, _waterId, cause: BlockChangeCause.Script); // engine-driven, not a player edit
+            placed++;
         }
+        return placed;
     }
 
     private bool WaterReaches(Vector3I p) =>

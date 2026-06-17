@@ -1,15 +1,16 @@
-// Translucent rippling water. Waves are a function of world XZ + time, so quads
-// that share an edge share the same displacement and stay welded (no cracks).
+// Translucent rippling water. The mesh is kept geometrically flat — no vertex
+// displacement — so greedy-merged quads of different sizes never produce T-junction
+// gaps or triangle-fold diagonal seams.
 //
-// The wave NORMAL is recomputed per-pixel in fragment() from the same world-XZ
-// wave function, instead of being interpolated from the four corner normals of a
-// (possibly 16-wide, greedy-merged) quad. Linear interpolation of a corner normal
-// across a quad spanning many wavelengths produced a facet whose slope broke at
-// every quad/chunk edge, and the nonlinear Fresnel turned that C1 break into the
-// faint grid of seams on the top surface. A per-pixel normal is continuous
-// everywhere regardless of tessellation, so the seams are gone.
+// The wave NORMAL is computed per-pixel in fragment() from a world-XZ wave function
+// sampled at each fragment's position. This is continuous across all quad boundaries
+// regardless of tessellation, and the nonlinear Fresnel shading stays seam-free.
 shader_type spatial;
-render_mode cull_disabled, diffuse_burley, specular_schlick_ggx, depth_draw_always;
+// No depth_draw_always: with cull_disabled (needed so a submerged player sees the
+// surface from below) each quad's front+back faces are coplanar; if both wrote depth
+// they z-fought, tearing the surface into view-dependent triangular facets where the
+// water terraces. Letting transparency sort normally removes the facets.
+render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 
 uniform vec3 shallow_color : source_color = vec3(0.20, 0.52, 0.66);
 uniform vec3 deep_color : source_color = vec3(0.04, 0.20, 0.34);
@@ -28,11 +29,12 @@ float wave(vec2 p, float t) {
 
 void vertex() {
     vec3 wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    float t = TIME * wave_speed;
-    float h = wave(wpos.xz, t);
-    VERTEX.y += h * wave_height;          // geometry still ripples
+    // No geometry displacement — the mesh stays flat so greedy-merged quads of
+    // different sizes share edge vertices at the same height (no T-junction gaps)
+    // and no triangle fold creates diagonal seams. Ripple appearance comes from
+    // the per-pixel analytic normal in fragment().
     v_up = NORMAL.y > 0.5 ? 1.0 : 0.0;
-    v_wpos = wpos;                         // xz is what the wave samples; unchanged by the y bob
+    v_wpos = wpos;
 }
 
 void fragment() {

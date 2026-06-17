@@ -41,6 +41,8 @@ public partial class Player : CharacterBody3D, IDamageable
     public bool IsDead { get; private set; }
     public bool InWater { get; private set; }
     public bool HeadUnderwater { get; private set; }
+    /// <summary>True while sprinting on the ground (drives the HUD vignette tighten).</summary>
+    public bool Sprinting { get; private set; }
 
     /// <summary>Current capsule height (shrinks while crouching). The block
     /// interactor reads this so it never wrongly rejects a placement near the body.</summary>
@@ -52,6 +54,7 @@ public partial class Player : CharacterBody3D, IDamageable
 
     private Node3D _head;
     private Camera3D _cam;
+    private float _baseFov;        // resting camera FOV; widens slightly while sprinting
     private CollisionShape3D _shape;
     private CapsuleShape3D _capsule;
     private bool _crouching;
@@ -59,6 +62,7 @@ public partial class Player : CharacterBody3D, IDamageable
     private bool _wasOnFloor = true;
     private float _drownTimer;
     private float _actionLock;
+    private Vector2 _mouseLook;   // mouse motion accumulated since the last physics tick (applied there, not per render frame)
     private float _stepDist;      // distance walked since the last footstep sound
     private bool _stepFlip;       // alternates footstep pitch for a natural gait
     private bool _wasInWater;     // to detect the splash when first entering water
@@ -81,6 +85,7 @@ public partial class Player : CharacterBody3D, IDamageable
         AddChild(_head);
         _cam = new Camera3D { Name = "Camera", Fov = 75f };
         _head.AddChild(_cam);
+        _baseFov = _cam.Fov;
 
         _bubbles = MakeBubbles();
         _head.AddChild(_bubbles);
@@ -110,10 +115,11 @@ public partial class Player : CharacterBody3D, IDamageable
 
         if (e is InputEventMouseMotion mm && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
-            float sens = MouseSensitivity * Core.Settings.MouseSensitivity;
-            RotateY(-mm.Relative.X * sens);
-            float pitch = Mathf.Clamp(_head.Rotation.X - mm.Relative.Y * sens, -1.5f, 1.5f);
-            _head.Rotation = new Vector3(pitch, 0, 0);
+            // Accumulate only; the rotation is applied on the physics tick (ApplyMouseLook)
+            // so look and movement share one cadence. Applying it here — at render-frame
+            // rate, while the body position only updates at the physics rate — makes the
+            // whole view jitter when moving and turning at once.
+            _mouseLook += mm.Relative;
         }
         else if (e.IsActionPressed(GameInput.Actions.ToggleMode))
         {
@@ -121,6 +127,23 @@ public partial class Player : CharacterBody3D, IDamageable
             // (_UnhandledInput already returned above when input is disabled.)
             SetCreative(!Creative);
         }
+    }
+
+    /// <summary>Apply the mouse motion accumulated since the last physics tick. Run
+    /// from <see cref="_PhysicsProcess"/> (not from input events) so the camera's
+    /// rotation updates on the same cadence as the body's position — otherwise the
+    /// two desync and the whole view jitters while moving and turning together.</summary>
+    private void ApplyMouseLook()
+    {
+        if (_mouseLook == Vector2.Zero) return;
+        if (InputEnabled && Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            float sens = MouseSensitivity * Core.Settings.MouseSensitivity;
+            RotateY(-_mouseLook.X * sens);
+            float pitch = Mathf.Clamp(_head.Rotation.X - _mouseLook.Y * sens, -1.5f, 1.5f);
+            _head.Rotation = new Vector3(pitch, 0, 0);
+        }
+        _mouseLook = Vector2.Zero;
     }
 
     /// <summary>Arrow-key / numpad camera look, so the game is fully playable
@@ -150,6 +173,7 @@ public partial class Player : CharacterBody3D, IDamageable
 
         if (IsDead) { Velocity = Velocity.Lerp(Vector3.Zero, dt * 4f); MoveAndSlide(); return; }
 
+        ApplyMouseLook();
         KeyboardLook(dt);
 
         // While the ground beneath us is still streaming in, hold position rather
@@ -167,6 +191,16 @@ public partial class Player : CharacterBody3D, IDamageable
 
         UpdateAir(dt);
         CheckHazards(dt);
+        UpdateFov(dt);
+    }
+
+    /// <summary>Ease the camera FOV a touch wider while sprinting, for a felt sense of
+    /// speed (a far more visible cue than the subtle HUD vignette tighten).</summary>
+    private void UpdateFov(float dt)
+    {
+        if (_cam == null) return;
+        float target = Sprinting ? _baseFov + 8f : _baseFov;
+        _cam.Fov = Mathf.MoveToward(_cam.Fov, target, 45f * dt);
     }
 
     // ---- movement modes ---------------------------------------------------
@@ -189,6 +223,8 @@ public partial class Player : CharacterBody3D, IDamageable
         float speed = _crouching ? CrouchSpeed
             : (InputEnabled && Input.IsActionPressed(GameInput.Actions.Sprint) ? SprintSpeed : WalkSpeed);
         float a = IsOnFloor() ? Accel : AirAccel;
+        Sprinting = IsOnFloor() && !_crouching && dir != Vector3.Zero
+                    && InputEnabled && Input.IsActionPressed(GameInput.Actions.Sprint);
 
         var horiz = new Vector3(vel.X, 0, vel.Z);
         horiz = horiz.MoveToward(dir * speed, a * dt * speed);
@@ -221,8 +257,28 @@ public partial class Player : CharacterBody3D, IDamageable
             _stepDist = 0f;
             _stepFlip = !_stepFlip;
             AudioManager.Play($"step_{GroundMaterial()}", _stepFlip ? 1.08f : 0.92f, -5f);
+            // A faint kick of material-tinted dust at the feet (skip over liquid/air).
+            if (World != null)
+            {
+                var gb = World.GetBlock(FloorV(GlobalPosition + new Vector3(0, -0.2f, 0)));
+                if (!gb.IsAir && !gb.IsLiquid)
+                    Fx.Burst(GlobalPosition, FxKind.Dust, DustTint(gb.Material), 4);
+            }
         }
     }
+
+    /// <summary>A faint, material-appropriate dust colour for footstep/landing puffs.</summary>
+    private static Color DustTint(MaterialSound m) => m switch
+    {
+        MaterialSound.Sand => new Color(0.85f, 0.74f, 0.50f, 0.5f),
+        MaterialSound.Grass => new Color(0.45f, 0.58f, 0.30f, 0.5f),
+        MaterialSound.Snow => new Color(0.92f, 0.95f, 1.00f, 0.5f),
+        MaterialSound.Wood => new Color(0.55f, 0.43f, 0.28f, 0.5f),
+        MaterialSound.Dirt => new Color(0.52f, 0.40f, 0.28f, 0.5f),
+        MaterialSound.Metal => new Color(0.60f, 0.60f, 0.65f, 0.45f),
+        MaterialSound.Cloth => new Color(0.70f, 0.66f, 0.60f, 0.45f),
+        _ => new Color(0.62f, 0.62f, 0.64f, 0.5f), // Stone + fallback
+    };
 
     /// <summary>The sound material of the block underfoot, for footstep audio.</summary>
     private MaterialSound GroundMaterial()
@@ -234,6 +290,7 @@ public partial class Player : CharacterBody3D, IDamageable
 
     private void SwimMove(float dt)
     {
+        Sprinting = false;
         Vector3 vel = Velocity;
         if (vel.Y < -5f) vel.Y = -5f; // water immediately arrests a fall (no deep plunge)
         Vector3 dir = WishDir();
@@ -292,6 +349,7 @@ public partial class Player : CharacterBody3D, IDamageable
 
     private void FlyMove(float dt)
     {
+        Sprinting = false;
         Vector3 dir = Vector3.Zero;
         if (InputEnabled)
         {
@@ -322,6 +380,14 @@ public partial class Player : CharacterBody3D, IDamageable
             // A small landing kick (even on a safe drop), scaling with the fall height.
             if (!InWater && fall > 1.2f)
                 Fx.Shake(Mathf.Clamp((fall - 1.2f) / 8f, 0.06f, 0.5f));
+            // A puff of material-tinted dust on landing, scaled by the fall height.
+            if (!InWater && fall > 0.6f && World != null)
+            {
+                var lb = World.GetBlock(FloorV(GlobalPosition + new Vector3(0, -0.2f, 0)));
+                if (!lb.IsAir && !lb.IsLiquid)
+                    Fx.Burst(GlobalPosition, FxKind.Poof, DustTint(lb.Material),
+                        Mathf.Clamp((int)(6 + fall * 2f), 6, 18));
+            }
             if (!InWater && fall > FallSafe)
                 Damage((fall - FallSafe) * FallDamagePerBlock, "fall");
             _airApexY = GlobalPosition.Y;

@@ -17,6 +17,12 @@ public sealed class EnemyType
     public Color Skin = new(0.82f, 0.68f, 0.55f);
     public Color Cloth = new(0.45f, 0.4f, 0.35f);
     public Color Accent = new(0.5f, 0.3f, 0.25f);
+    /// <summary>Optional res:// path to a rigged glTF model for this archetype. When set
+    /// and loadable, it replaces the procedural box model; null = procedural (default).</summary>
+    public string ModelScene = null;
+    /// <summary>Yaw (degrees) to face the imported model the right way (180 if it imports
+    /// facing backwards). Ignored for the procedural box model.</summary>
+    public float ModelYawDeg = 0f;
 
     public static EnemyType Soldier() => new()
     {
@@ -46,11 +52,13 @@ public partial class Enemy : CharacterBody3D, IDamageable
 
     public EnemyType Type = EnemyType.Soldier();
     public Node3D Target;
+    public VoxelWorld World; // for step-up probing; null = no climbing (still walks)
     public float Health;
     public float MaxHealth;
 
     private HealthBar3D _bar;
-    private Node3D _model;
+    private Node3D _modelNode;          // the visual root (box rig or rigged glTF)
+    private ICharacterModel _model;     // same object, for animation calls
     private CapsuleShape3D _capsule;
     private bool _dead;
     private float _attackTimer;
@@ -66,11 +74,12 @@ public partial class Enemy : CharacterBody3D, IDamageable
         Health = MaxHealth;
         float s = Type.Scale;
 
-        _model = Type.Beast
-            ? MobModel.BuildBeast(Type.Skin, Type.Cloth)
-            : MobModel.BuildHumanoid(Type.Skin, Type.Cloth, Type.Accent);
-        _model.Scale = Vector3.One * s;
-        AddChild(_model);
+        _modelNode = Type.Beast
+            ? CharacterModel.BuildBeast(Type.Skin, Type.Cloth, Type.ModelScene, Type.ModelYawDeg)
+            : CharacterModel.BuildHumanoid(Type.Skin, Type.Cloth, Type.Accent, Type.ModelScene, Type.ModelYawDeg);
+        _model = (ICharacterModel)_modelNode;
+        _modelNode.Scale = Vector3.One * s;
+        AddChild(_modelNode);
 
         float height = (Type.Beast ? 1.0f : 1.9f) * s;
         float radius = (Type.Beast ? 0.5f : 0.35f) * s;
@@ -115,6 +124,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
                 if (_attackTimer <= 0f)
                 {
                     _attackTimer = Type.AttackCooldown;
+                    _model.Attack();
                     if (Target is IDamageable dd && dd.IsAlive) dd.TakeDamage(Type.Damage, this);
                 }
             }
@@ -125,17 +135,54 @@ public partial class Enemy : CharacterBody3D, IDamageable
             vel.Z = Mathf.MoveToward(vel.Z, 0, Type.Speed);
         }
 
+        var desired = new Vector3(vel.X, 0, vel.Z); // intended horizontal motion (pre-collision)
         Velocity = vel;
         MoveAndSlide();
 
-        // simple step-up: if grounded and stuck while wanting to move, hop a little
-        if (IsOnFloor())
+        // Climb obstacles in the way: when grounded but blocked while trying to move,
+        // jump just high enough to land on the ledge ahead, so a chasing mob follows
+        // the player up terrain and low blocks instead of grinding against them. Taller
+        // mobs (Goliath) reach higher. Unreachable ledges return 0 -> no hop, so it
+        // waits at the base rather than bouncing in place.
+        if (IsOnFloor() && desired.Length() > 0.5f)
         {
             float moved = new Vector3(GlobalPosition.X - _lastPos.X, 0, GlobalPosition.Z - _lastPos.Z).Length();
-            bool wantsMove = Mathf.Abs(Velocity.X) + Mathf.Abs(Velocity.Z) > 0.5f;
-            if (wantsMove && moved < 0.01f) Velocity = new Vector3(Velocity.X, 6f, Velocity.Z);
+            if (moved < 0.02f)
+            {
+                float climb = StepUpHeight(desired.Normalized());
+                if (climb > 0f)
+                    Velocity = new Vector3(Velocity.X, Mathf.Sqrt(2f * Gravity * (climb + 0.35f)), Velocity.Z);
+            }
         }
         _lastPos = GlobalPosition;
+
+        // Drive the model's walk/idle by actual planar speed (procedural box rig or
+        // the rigged glTF's clips — same call either way).
+        _model.Animate(new Vector3(Velocity.X, 0, Velocity.Z).Length(), dt);
+    }
+
+    /// <summary>If a solid ledge blocks the path in <paramref name="dir"/> and its top is
+    /// within this mob's climb reach (about half its height) with clear headroom above,
+    /// return that ledge height in blocks so the caller can jump onto it; otherwise 0.</summary>
+    private float StepUpHeight(Vector3 dir)
+    {
+        if (World == null) return 0f;
+        Vector3 ahead = GlobalPosition + dir * (_capsule.Radius + 0.4f);
+        int ax = Mathf.FloorToInt(ahead.X), az = Mathf.FloorToInt(ahead.Z);
+        int feetY = Mathf.FloorToInt(GlobalPosition.Y + 0.05f);
+        int maxClimb = Mathf.Max(1, Mathf.CeilToInt(_capsule.Height * 0.5f));
+        int headroom = Mathf.Max(2, Mathf.CeilToInt(_capsule.Height));
+        for (int h = 1; h <= maxClimb; h++)
+        {
+            var foot = new Vector3I(ax, feetY + h - 1, az); // block we'd stand on
+            var stand = new Vector3I(ax, feetY + h, az);     // must be clear to stand in
+            if (!World.IsSolid(foot) || World.IsSolid(stand)) continue;
+            bool clear = true;
+            for (int c = 1; c <= headroom; c++)
+                if (World.IsSolid(stand + new Vector3I(0, c, 0))) { clear = false; break; }
+            if (clear) return h;
+        }
+        return 0f;
     }
 
     public void TakeDamage(float amount, Node3D source)
@@ -144,6 +191,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
         Health = Mathf.Max(0, Health - amount);
         _bar.SetFraction(Health / MaxHealth);
         Flash();
+        _model.Squash();
         if (Health > 0) AudioManager.Play("hit"); // defeat plays its own sound
         if (Health <= 0) Defeat();
     }
@@ -155,15 +203,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
         if (!_dead) SetHitFlash(false);
     }
 
-    private void SetHitFlash(bool on)
-    {
-        foreach (Node n in _model.GetChildren())
-            if (n is MeshInstance3D mi && mi.MaterialOverride is StandardMaterial3D m)
-            {
-                m.EmissionEnabled = on;
-                m.Emission = on ? new Color(0.9f, 0.15f, 0.12f) : Colors.Black;
-            }
-    }
+    private void SetHitFlash(bool on) => _model.SetFlash(on);
 
     private void Defeat()
     {
@@ -181,7 +221,7 @@ public partial class Enemy : CharacterBody3D, IDamageable
         Fx.HitStop(0.06f);
         // shrink and remove
         var tween = CreateTween();
-        tween.TweenProperty(_model, "scale", Vector3.One * 0.01f, 0.45f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.In);
+        tween.TweenProperty(_modelNode, "scale", Vector3.One * 0.01f, 0.45f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.In);
         tween.TweenCallback(Callable.From(QueueFree));
     }
 }

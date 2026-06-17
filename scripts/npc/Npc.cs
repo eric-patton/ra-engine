@@ -18,16 +18,24 @@ public partial class Npc : CharacterBody3D
     public Color Accent = new(0.7f, 0.6f, 0.4f);
     public float FaceRange = 7f;
     public bool Beast = false; // use the animal model instead of a humanoid
+    /// <summary>Optional res:// path to a rigged glTF model; null = procedural box model.</summary>
+    public string ModelScene = null;
+    /// <summary>Yaw (degrees) to orient an imported model correctly (180 if backwards).</summary>
+    public float ModelYawDeg = 0f;
 
-    private Node3D _model;
+    private Node3D _modelNode;
+    private ICharacterModel _model;
     private Node3D _player;
     private const float Gravity = 22f;
 
     public override void _Ready()
     {
         AddToGroup("npc");
-        _model = Beast ? MobModel.BuildBeast(Skin, Robe) : MobModel.BuildHumanoid(Skin, Robe, Accent);
-        AddChild(_model);
+        _modelNode = Beast
+            ? CharacterModel.BuildBeast(Skin, Robe, ModelScene, ModelYawDeg)
+            : CharacterModel.BuildHumanoid(Skin, Robe, Accent, ModelScene, ModelYawDeg);
+        _model = (ICharacterModel)_modelNode;
+        AddChild(_modelNode);
 
         var col = new CollisionShape3D
         {
@@ -62,6 +70,8 @@ public partial class Npc : CharacterBody3D
         vel.X = 0; vel.Z = 0;
         Velocity = vel;
         MoveAndSlide();
+
+        _model.Animate(0f, dt); // standing idle breath
 
         _player ??= GetTree().GetFirstNodeInGroup("player") as Node3D;
         if (_player != null)

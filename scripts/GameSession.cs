@@ -23,6 +23,7 @@ public partial class GameSession : Node3D
     public BlockInteractor Interactor { get; private set; }
     public BuildEditor Editor { get; private set; }
     public WeaponController Weapons { get; private set; }
+    public FireController Fire { get; private set; }
     private HeldItem _held;
     public DialogueBox Dialogue { get; private set; }
     public Narrator Narrator { get; private set; }
@@ -118,7 +119,7 @@ public partial class GameSession : Node3D
         Dialogue.Finished += OnDialogueFinished;
 
         Pause = new PauseMenu { Name = "PauseMenu" };
-        Pause.CanPause = () => !InDialogue && !_crafting && !_teacherOpen && !_presentMode;
+        Pause.CanPause = () => !InDialogue && !_crafting && !_teacherOpen && !_presentMode && !_reading;
         Pause.OnReturnToMenu = () => ReturnToMenuRequested?.Invoke();
         AddChild(Pause);
 
@@ -137,6 +138,13 @@ public partial class GameSession : Node3D
         Fx.OnShake = screenFx.AddTrauma;
         Fx.OnFlash = Hud.Flash;
         Player.Hurt += OnPlayerHurt;
+
+        // Living fire: a conductor that lights/flickers torches, campfires, braziers and
+        // altar fires, budgets their lights by distance, and auto-lights an altar fire
+        // wherever a player places the altar_fire block. Fires are added by lessons / the
+        // showcase via Fire.AddFire.
+        Fire = new FireController { Name = "FireController", Player = Player, Env = Env, World = World };
+        AddChild(Fire);
 
         SetMode(creative ? Mode.Build : Mode.Adventure);
 
@@ -340,9 +348,10 @@ public partial class GameSession : Node3D
     public override void _Process(double delta)
     {
         if (Player == null) return;
-        // Light tint at the waterline (body in water), strong murk when submerged.
-        Hud.SetUnderwater(Player.HeadUnderwater ? 1f : (Player.InWater ? 0.35f : 0f));
+        // Full murk only when the head goes under; body-in-water with head above water gets nothing.
+        Hud.SetUnderwater(Player.HeadUnderwater ? 1f : 0f);
         Hud.SetAirDarken(Player.MaxAir > 0f ? 1f - Player.Air / Player.MaxAir : 0f);
+        Hud.SetSprinting(Player.Sprinting); // tighten the vignette slightly while sprinting
 
         // Keep the compass pointing where the player faces (North = -Z).
         Vector3 fwd = -Player.GlobalTransform.Basis.Z;
@@ -368,6 +377,15 @@ public partial class GameSession : Node3D
         {
             if (Input.IsActionJustPressed(GameInput.Actions.Screenshot)) TakeScreenshot();
             if (Input.IsActionJustPressed(GameInput.Actions.Pause)) ExitPresentMode();
+            return;
+        }
+
+        // Sign reader modal: holds all other interaction; close on E or Esc.
+        if (_reading)
+        {
+            if (Input.IsActionJustPressed(GameInput.Actions.Interact)
+                || Input.IsActionJustPressed(GameInput.Actions.Pause))
+                CloseReader();
             return;
         }
 
@@ -445,8 +463,51 @@ public partial class GameSession : Node3D
         }
         else
         {
-            Hud.SetInteractPrompt("");
+            // No NPC in reach — offer the nearest signpost to read instead.
+            RAEngine.World.Signpost sign = null;
+            float signDist = InteractRange;
+            foreach (Node n in GetTree().GetNodesInGroup("signpost"))
+            {
+                if (n is not RAEngine.World.Signpost sp) continue;
+                float d = sp.GlobalPosition.DistanceTo(Player.GlobalPosition);
+                if (d < signDist) { signDist = d; sign = sp; }
+            }
+            if (sign != null)
+            {
+                Hud.SetInteractPrompt("[E]  Read sign");
+                if (Input.IsActionJustPressed(GameInput.Actions.Interact)) OpenReader(sign);
+            }
+            else
+            {
+                Hud.SetInteractPrompt("");
+            }
         }
+    }
+
+    private bool _reading;
+    private Input.MouseModeEnum _preReadMouse = Input.MouseModeEnum.Visible;
+
+    /// <summary>Open the scrollable sign-reading modal, freeing the cursor and holding
+    /// player input (mirrors the dialogue flow).</summary>
+    private void OpenReader(RAEngine.World.Signpost sign)
+    {
+        _reading = true;
+        Hud.SetInteractPrompt("");
+        Player.InputEnabled = false;
+        Weapons.SetEnabled(false);
+        Interactor.CanEdit = false;
+        _preReadMouse = Input.MouseMode;
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        Hud.OpenReader(sign.Title, sign.Text);
+    }
+
+    private void CloseReader()
+    {
+        _reading = false;
+        Hud.CloseReader();
+        Player.InputEnabled = true;
+        Input.MouseMode = _preReadMouse;
+        SetMode(CurrentMode); // restore weapon/build interaction for the mode
     }
 
     /// <summary>In click-to-capture mode, a click in the world grabs the cursor so
@@ -520,11 +581,26 @@ public partial class GameSession : Node3D
 
     public Enemy SpawnEnemy(EnemyType type, Vector3 position)
     {
-        var e = new Enemy { Type = type, Target = Player, Name = $"Enemy_{type.Name}" };
+        var e = new Enemy { Type = type, Target = Player, World = World, Name = $"Enemy_{type.Name}" };
         World.AddChild(e);
-        e.GlobalPosition = position;
+        e.GlobalPosition = GroundSnap(position);
         e.Defeated += () => EmitSignal(SignalName.EnemyDefeated, type.Name);
         return e;
+    }
+
+    /// <summary>Raise a spawn so the mob's feet rest on top of the highest solid
+    /// block in that column — otherwise a mob placed at a hand-authored Y can spawn
+    /// buried inside raised terrain (a hill/mound/structure) and be unable to move.
+    /// Mob origins are at the feet, so feet sit at (top solid Y + 1). Falls back to
+    /// the requested position if the column has no solid block.</summary>
+    private Vector3 GroundSnap(Vector3 position)
+    {
+        int x = Mathf.FloorToInt(position.X);
+        int z = Mathf.FloorToInt(position.Z);
+        for (int y = 128; y >= -32; y--)
+            if (World.IsSolid(new Vector3I(x, y, z)))
+                return new Vector3(position.X, y + 1, position.Z);
+        return position;
     }
 
     /// <summary>Build a narration trigger that also fires a quest "Reach" objective with

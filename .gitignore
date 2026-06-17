@@ -20,12 +20,16 @@ mono_crash.*.json
 .DS_Store
 Thumbs.db
 
+# Local backups of project files (e.g. "RA Engine.csproj.old")
+*.old
+
 # godot-ai MCP editor plugin (a dev tool, lives at C:\repos\external\godot-ai) — local-only, not published
 /addons/godot_ai/
 
-# Session scratch (debug runs, screenshots)
+# Session scratch (debug runs, screenshots, headless test result dumps)
 run_*.log
 _startup_*.txt
+_*.txt
 _*.png
 _*.png.import
 /shots/

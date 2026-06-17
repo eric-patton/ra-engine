@@ -262,10 +262,44 @@ public static class ChunkMesher
         Vector3 p2 = baseLocal + o + duv + dvv;
         Vector3 p3 = baseLocal + o + dvv;
 
-        surf.AddVertex(p0, normal, tangent, new Vector2(0, 0), new Color(layer, ao0 / 3f, 0f, 0f));
-        surf.AddVertex(p1, normal, tangent, new Vector2(w, 0), new Color(layer, ao1 / 3f, 0f, 0f));
-        surf.AddVertex(p2, normal, tangent, new Vector2(w, h), new Color(layer, ao2 / 3f, 0f, 0f));
-        surf.AddVertex(p3, normal, tangent, new Vector2(0, h), new Color(layer, ao3 / 3f, 0f, 0f));
+        Vector2 uv0, uv1, uv2, uv3;
+        if (f == 2 || f == 3)
+        {
+            // Top / bottom faces: du/dv are both horizontal so the default mapping is fine.
+            uv0 = new Vector2(0, 0);
+            uv1 = new Vector2(w, 0);
+            uv2 = new Vector2(w, h);
+            uv3 = new Vector2(0, h);
+        }
+        else
+        {
+            // Side faces (f 0,1,4,5): remap UVs so that the texture's V axis always points
+            // world-up regardless of which in-plane axis du/dv happen to be.  This keeps
+            // directional side textures (grass fringe, sandstone bands, brick courses) upright
+            // and identically oriented on every vertical face.
+            //   V = (maxY - corner.Y)   → V=0 at the quad top   → image-top row sits at the block top.
+            //   U = (corner.H - minH)   → U=0 at the quad's left horizontal edge (H = Z for ±X, X for ±Z).
+            float maxY = Mathf.Max(Mathf.Max(p0.Y, p1.Y), Mathf.Max(p2.Y, p3.Y));
+            float h0, h1, h2, h3, minH;
+            if (f == 0 || f == 1)   // ±X: horizontal in-plane axis is Z
+            {
+                h0 = p0.Z; h1 = p1.Z; h2 = p2.Z; h3 = p3.Z;
+            }
+            else                    // ±Z: horizontal in-plane axis is X
+            {
+                h0 = p0.X; h1 = p1.X; h2 = p2.X; h3 = p3.X;
+            }
+            minH = Mathf.Min(Mathf.Min(h0, h1), Mathf.Min(h2, h3));
+            uv0 = new Vector2(h0 - minH, maxY - p0.Y);
+            uv1 = new Vector2(h1 - minH, maxY - p1.Y);
+            uv2 = new Vector2(h2 - minH, maxY - p2.Y);
+            uv3 = new Vector2(h3 - minH, maxY - p3.Y);
+        }
+
+        surf.AddVertex(p0, normal, tangent, uv0, new Color(layer, ao0 / 3f, 0f, 0f));
+        surf.AddVertex(p1, normal, tangent, uv1, new Color(layer, ao1 / 3f, 0f, 0f));
+        surf.AddVertex(p2, normal, tangent, uv2, new Color(layer, ao2 / 3f, 0f, 0f));
+        surf.AddVertex(p3, normal, tangent, uv3, new Color(layer, ao3 / 3f, 0f, 0f));
         foreach (int t in VoxelGeometry.TriOrder)
             surf.Indices.Add(baseIdx + t);
 

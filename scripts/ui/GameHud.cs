@@ -23,6 +23,7 @@ public partial class GameHud : CanvasLayer
     {
         BuildUnderwater();
         BuildDamage();
+        BuildPost(); // vignette + grain over the scene, before the crisp UI layers
         BuildCrosshair();
         BuildHotbar();
         BuildBars();
@@ -34,6 +35,7 @@ public partial class GameHud : CanvasLayer
         BuildCompass();
         BuildClock();
         BuildDebug();
+        BuildReader(); // sign-reading modal, above the HUD but under the fade
         BuildFade(); // last: a scene-transition curtain drawn over everything
     }
 
@@ -178,6 +180,32 @@ public partial class GameHud : CanvasLayer
     /// vignette as a gentle "come up for air" cue. Only visible while submerged.</summary>
     public void SetAirDarken(float v) => _airDarken = Mathf.Clamp(v, 0f, 1f);
 
+    // ---- screen post (vignette + film grain) ------------------------------
+
+    private ColorRect _post;
+    private ShaderMaterial _postMat;
+    private float _vignCur = 0.28f;     // current, eased
+    private float _vignTarget = 0.28f;  // 0.28 normal, ~0.36 sprinting
+
+    private void BuildPost()
+    {
+        _post = new ColorRect { Name = "Post", MouseFilter = Control.MouseFilterEnum.Ignore };
+        _post.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        var shader = GD.Load<Shader>("res://assets/shaders/post.gdshader");
+        if (shader != null)
+        {
+            _postMat = new ShaderMaterial { Shader = shader };
+            _post.Material = _postMat;
+            _post.Visible = true;
+        }
+        else _post.Visible = false; // no shader -> no-op (e.g. missing asset)
+        AddChild(_post);
+    }
+
+    /// <summary>Tighten the vignette slightly while sprinting (a sense of exertion),
+    /// relax it otherwise. Eased in <see cref="_Process"/>.</summary>
+    public void SetSprinting(bool on) => _vignTarget = on ? 0.36f : 0.28f;
+
     // ---- damage / low-health overlay --------------------------------------
 
     private ColorRect _damage;
@@ -227,7 +255,12 @@ public partial class GameHud : CanvasLayer
         if (_underwater != null)
         {
             if (!Mathf.IsEqualApprox(_uwStrength, _uwTarget))
-                _uwStrength = Mathf.MoveToward(_uwStrength, _uwTarget, dt * 3.5f);
+            {
+                // Ease in fast (head just submerged), ease out slowly so the effect
+                // lingers ~0.7 s after the head surfaces rather than snapping off.
+                float rate = _uwTarget < _uwStrength ? 1.4f : 3.5f;
+                _uwStrength = Mathf.MoveToward(_uwStrength, _uwTarget, dt * rate);
+            }
             bool show = _uwStrength > 0.001f;
             _underwater.Visible = show;
             if (show)
@@ -250,6 +283,100 @@ public partial class GameHud : CanvasLayer
             bool dshow = _dmgFlash > 0.001f || _lowHealth > 0.001f;
             if (_damage.Visible != dshow) _damage.Visible = dshow;
         }
+
+        // Screen post: ease the reactive vignette toward its target and push it.
+        if (_postMat != null && !Mathf.IsEqualApprox(_vignCur, _vignTarget))
+        {
+            _vignCur = Mathf.MoveToward(_vignCur, _vignTarget, dt * 0.18f);
+            _postMat.SetShaderParameter("vignette_strength", _vignCur);
+        }
+    }
+
+    // ---- sign reader modal ------------------------------------------------
+
+    private Control _reader;
+    private Label _readerTitle, _readerBody;
+    public bool ReaderOpen { get; private set; }
+
+    private void BuildReader()
+    {
+        _reader = new Control { Name = "Reader", Visible = false };
+        _reader.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+
+        var dim = new ColorRect { Color = new Color(0f, 0f, 0f, 0.55f), MouseFilter = Control.MouseFilterEnum.Stop };
+        dim.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _reader.AddChild(dim);
+
+        var center = new CenterContainer();
+        center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _reader.AddChild(center);
+
+        var panel = new PanelContainer { CustomMinimumSize = new Vector2(680, 460) };
+        panel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+        {
+            BgColor = new Color(0.12f, 0.10f, 0.08f, 0.98f),
+            BorderColor = new Color(0.55f, 0.42f, 0.22f),
+            BorderWidthTop = 3, BorderWidthBottom = 3, BorderWidthLeft = 3, BorderWidthRight = 3,
+            CornerRadiusTopLeft = 10, CornerRadiusTopRight = 10, CornerRadiusBottomLeft = 10, CornerRadiusBottomRight = 10,
+            ContentMarginLeft = 26, ContentMarginRight = 26, ContentMarginTop = 22, ContentMarginBottom = 22,
+        });
+        center.AddChild(panel);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 14);
+        panel.AddChild(vbox);
+
+        _readerTitle = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        _readerTitle.AddThemeFontSizeOverride("font_size", 30);
+        _readerTitle.AddThemeColorOverride("font_color", new Color(1f, 0.9f, 0.55f));
+        _readerTitle.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _readerTitle.AddThemeConstantOverride("outline_size", 4);
+        vbox.AddChild(_readerTitle);
+
+        var scroll = new ScrollContainer
+        {
+            CustomMinimumSize = new Vector2(628, 340),
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        vbox.AddChild(scroll);
+
+        _readerBody = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize = new Vector2(620, 0),
+        };
+        _readerBody.AddThemeFontSizeOverride("font_size", 21);
+        _readerBody.AddThemeColorOverride("font_color", new Color(0.92f, 0.92f, 0.88f));
+        scroll.AddChild(_readerBody);
+
+        var hint = new Label
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Text = "[E] or Esc to close   ·   scroll to read more",
+        };
+        hint.AddThemeFontSizeOverride("font_size", 15);
+        hint.AddThemeColorOverride("font_color", new Color(0.72f, 0.72f, 0.72f));
+        vbox.AddChild(hint);
+
+        AddChild(_reader);
+    }
+
+    /// <summary>Show the sign-reading modal with a title and (scrollable) body.</summary>
+    public void OpenReader(string title, string body)
+    {
+        if (_reader == null) return;
+        _readerTitle.Text = title ?? "";
+        _readerBody.Text = body ?? "";
+        _reader.Visible = true;
+        ReaderOpen = true;
+    }
+
+    public void CloseReader()
+    {
+        if (_reader == null) return;
+        _reader.Visible = false;
+        ReaderOpen = false;
     }
 
     // ---- scene-transition fade --------------------------------------------

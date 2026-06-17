@@ -72,7 +72,10 @@ public static class WorldGen
     /// props, so a single screenshot exercises the whole texture library.</summary>
     public static void Showcase(VoxelWorld w)
     {
-        FlatGround(w, -4, 52, -4, 20, 0);
+        // Ground wide enough that every block pillar (spaced 2 apart) sits on solid ground.
+        int pillars = 0;
+        foreach (var b in BlockRegistry.All) if (!b.IsAir && b.Name != "water") pillars++;
+        FlatGround(w, -4, 2 + pillars * 2 + 4, -4, 20, 0);
 
         int i = 0;
         foreach (var block in BlockRegistry.All)
@@ -101,6 +104,111 @@ public static class WorldGen
 
         // a small mud-brick hut to show off building
         BuildHut(w, new Vector3I(16, 1, 12), 6, 5, 4);
+    }
+
+    /// <summary>A hand-built, static stage that shows off the visual effects (see
+    /// docs/FX-ROADMAP.md). Grows each phase. Phase 0: a long grass plain (wind grass +
+    /// depth haze toward a far ridge), a runway of distinct footstep materials, a jump
+    /// tower (landing dust), a water pool (splash), and an emissive lamp cluster (bloom).
+    /// Driven interactively by ShowcaseController (F5 weather / F6 time / F7 glow).
+    /// Player spawns at (20, 2, 100) facing north (−Z), walking the stations toward z=0.</summary>
+    public static void FxShowcase(VoxelWorld w)
+    {
+        ushort grass = BlockRegistry.IdOf("grass");
+        ushort stone = BlockRegistry.IdOf("stone");
+        ushort sand = BlockRegistry.IdOf("sand");
+        ushort water = BlockRegistry.IdOf("water");
+        ushort lamp = BlockRegistry.IdOf("lamp");
+
+        // Main flat grass stage (foreground apron + the far ridge base).
+        FlatGround(w, -4, 40, -30, 116, 0);
+
+        // A distant ridge rising toward the back (z < −2) so looking north shows the haze —
+        // tall enough (~0..20) that the atmospheric fade across its face is clearly visible.
+        for (int z = -2; z >= -30; z--)
+        {
+            int h = (int)((-2 - z) * 0.72f);
+            for (int x = -4; x <= 40; x++)
+                for (int y = 1; y <= h; y++)
+                    w.SetBlock(x, y, z, y == h ? grass : stone, false);
+        }
+
+        // Footstep-material bands across Z: walking north the player crosses each in turn
+        // (dirt → sand → stone → snow → planks → cloth), hearing + seeing the dust change.
+        (int z0, int z1, string block)[] bands =
+        {
+            (90, 92, "dirt"), (87, 89, "sand"), (84, 86, "stone"),
+            (81, 83, "snow"), (78, 80, "planks"), (75, 77, "cloth_red"),
+        };
+        foreach (var (z0, z1, name) in bands)
+        {
+            ushort id = BlockRegistry.IdOf(name);
+            for (int x = 0; x <= 35; x++)
+                for (int z = z0; z <= z1; z++)
+                    w.SetBlock(x, 0, z, id, false);
+        }
+
+        // Jump tower: a 4-step staircase ascending NORTH (the way the player walks) into a
+        // 4-high platform. Every step is exactly ONE block (the old version stacked the
+        // platform on the top stair column, making an un-jumpable 2-block step). Open drop
+        // off the north edge onto a sand pad.
+        for (int i = 0; i < 4; i++)               // z76→73, heights 1..4, 3 wide (x19..21)
+            for (int x = 19; x <= 21; x++)
+                for (int y = 1; y <= i + 1; y++)
+                    w.SetBlock(x, y, 76 - i, stone, false);
+        for (int x = 19; x <= 21; x++)            // solid platform top at y=4 (z71..72)
+            for (int z = 71; z <= 72; z++)
+                for (int y = 1; y <= 4; y++)
+                    w.SetBlock(x, y, z, stone, false);
+        for (int x = 16; x <= 24; x++)            // sand landing pad north of the drop
+            for (int z = 66; z <= 70; z++)
+                w.SetBlock(x, 0, z, sand, false);
+
+        // Water pool (splash + reflections), sand-rimmed.
+        for (int x = 2; x <= 12; x++)
+            for (int z = 56; z <= 64; z++)
+                w.SetBlock(x, 0, z, sand, false);
+        for (int x = 3; x <= 11; x++)
+            for (int z = 57; z <= 63; z++)
+            {
+                w.SetBlock(x, 0, z, water, false);
+                w.SetBlock(x, -1, z, water, false);
+            }
+
+        // Emissive lamp cluster on little pillars (bloom, esp. at night / Divine glow).
+        foreach (var (lx, lz) in new[] { (31, 56), (35, 56), (33, 58), (33, 54) })
+        {
+            w.SetBlock(lx, 1, lz, stone, false);
+            w.SetBlock(lx, 2, lz, lamp, false);
+        }
+
+        // Fire station (Phase 1): the props that the living fires sit on — one of every
+        // size. The flame visuals + lights are spawned by FireController in
+        // Game.StartShowcase (see the matching positions there); here we only place the
+        // blocks, all from the existing library so no new textures are needed.
+        ushort oakLog = BlockRegistry.IdOf("oak_log");
+        ushort cobble = BlockRegistry.IdOf("cobblestone");
+        ushort bronze = BlockRegistry.IdOf("bronze_block");
+        ushort stoneBrick = BlockRegistry.IdOf("stone_brick");
+        ushort altarFire = BlockRegistry.IdOf("altar_fire");
+        ushort planks = BlockRegistry.IdOf("planks");
+
+        w.SetBlock(22, 1, 102, planks, false);                 // candle stand
+        w.SetBlock(22, 1, 106, oakLog, false);                 // torch post
+        foreach (var (cx, cz) in new[] { (26, 104), (28, 104), (27, 103), (27, 105) })
+            w.SetBlock(cx, 1, cz, oakLog, false);              // campfire ring (flame in the middle)
+        w.SetBlock(24, 1, 104, cobble, false);                 // forge block
+        w.SetBlock(31, 1, 102, cobble, false);                 // brazier pedestal
+        w.SetBlock(31, 2, 102, bronze, false);
+        w.SetBlock(31, 1, 106, stoneBrick, false);             // altar
+        w.SetBlock(31, 2, 106, stoneBrick, false);
+        w.SetBlock(31, 3, 106, altarFire, false);              // altar coals (emissive block)
+
+        // A few trees in the open field (ambience; future falling leaves).
+        Tree(w, new Vector3I(8, 1, 42));
+        Tree(w, new Vector3I(30, 1, 46));
+        Tree(w, new Vector3I(16, 1, 34));
+        Tree(w, new Vector3I(36, 1, 38));
     }
 
     /// <summary>A simple tree: a log trunk with a blobby leaf canopy.</summary>

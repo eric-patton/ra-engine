@@ -24,6 +24,7 @@ public partial class Game : Node3D
     {
         var version = (string)Engine.GetVersionInfo()["string"];
         GD.Print($"[RA] Game ready on Godot {version}");
+        MatchPhysicsToRefresh();
         Core.Settings.Load();
         AddChild(new Core.AudioManager { Name = "Audio" }); // persistent, app-wide sound
         AddChild(new Core.Fx { Name = "Fx" });               // persistent, app-wide particles + screen effects
@@ -86,6 +87,15 @@ public partial class Game : Node3D
             case "--test-water":
                 RunWaterTest();
                 break;
+            case "--test-waterstep":
+                RunWaterStepTest();
+                break;
+            case "--test-waterlane":
+                RunWaterLaneTest();
+                break;
+            case "--test-waterdepth":
+                RunWaterDepthTest();
+                break;
             case "--test-mining":
                 RunMiningTest();
                 break;
@@ -122,6 +132,18 @@ public partial class Game : Node3D
             case "--test-combat":
                 RunCombatTest();
                 break;
+            case "--test-mob":
+                RunMobTest();
+                break;
+            case "--test-spawn":
+                RunSpawnTest();
+                break;
+            case "--test-climb":
+                RunClimbTest();
+                break;
+            case "--test-rigged":
+                RunRiggedTest();
+                break;
             case "--test-npc":
                 RunNpcTest();
                 break;
@@ -136,6 +158,9 @@ public partial class Game : Node3D
                 break;
             case "--sandbox":
                 StartSandbox();
+                break;
+            case "--showcase":
+                StartShowcase();
                 break;
             case "--test-creation":
                 RunCreationTest();
@@ -166,6 +191,22 @@ public partial class Game : Node3D
     }
 
     private void QuitSoon() => GetTree().CreateTimer(0.1).Timeout += () => GetTree().Quit(0);
+
+    /// <summary>Match the physics tick rate to the monitor's refresh rate, so the
+    /// player's look + movement (applied on the physics tick) update at display rate —
+    /// smooth, with no translate-vs-rotate jitter. The project.godot value is just a
+    /// fallback for when the rate can't be read (and for the headless test runner,
+    /// which has no display). Clamped to a sane range so an unusual panel can't make
+    /// physics absurdly slow or expensive.</summary>
+    private void MatchPhysicsToRefresh()
+    {
+        if (DisplayServer.GetName() == "headless") return; // no display (headless tests) -> keep the default
+        float hz = (float)DisplayServer.ScreenGetRefreshRate(DisplayServer.WindowGetCurrentScreen());
+        if (hz <= 0f) { GD.Print("[RA] refresh rate unknown; keeping default physics tick rate"); return; }
+        int ticks = Mathf.Clamp(Mathf.RoundToInt(hz), 60, 360);
+        Engine.PhysicsTicksPerSecond = ticks;
+        GD.Print($"[RA] physics tick rate = {ticks} Hz (panel reports {hz:F1} Hz)");
+    }
 
     /// <summary>Dump every synthesized sound to assets/audio/*.wav for inspection
     /// (the game itself generates these at runtime; the files are a dev artifact).</summary>
@@ -218,6 +259,7 @@ public partial class Game : Node3D
         _menu = new UI.MainMenu { Name = "MainMenu", Progress = Core.CampaignStore.Load() };
         _menu.OnPlayLesson = id => StartLesson(Lessons.LessonCatalog.Get(id));
         _menu.OnSandbox = ShowSaveMenu;
+        _menu.OnShowcase = LaunchShowcase;
         _menu.OnQuit = () => GetTree().Quit();
         AddChild(_menu);
         Core.AudioManager.StartMusic();   // calm bed under the menu
@@ -286,6 +328,116 @@ public partial class Game : Node3D
 
     /// <summary>A fresh sandbox (used by the --sandbox CLI flag).</summary>
     private void StartSandbox() => StartSandbox(NewWorldSave());
+
+    /// <summary>Dispatch a showcase by id (wired to the menu's Showcases submenu).</summary>
+    private void LaunchShowcase(string id)
+    {
+        if (id == "blocks") StartBlockGallery();
+        else StartShowcase();
+    }
+
+    /// <summary>Shared prologue for the static showcase worlds: a non-streaming session in
+    /// walking mode, damage off, with a brisk visible day cycle.</summary>
+    private void BeginShowcaseSession(Vector3 spawn)
+    {
+        ClearMenu();
+        _saveName = null;
+        _session = new GameSession { Name = "Session", ReturnToMenuRequested = ShowMainMenu };
+        AddChild(_session);
+        _session.Setup(spawn, creative: false);
+        _session.Env.SetCycle(true, 240f);          // a brisk 4-minute day so the cycle is visible
+        _session.Env.TimeOfDay = Core.EnvironmentController.Morning;
+        _session.Env.SetWeatherFollow(_session.Player);
+        _session.Player.SafeMode = true;            // no fall/hazard damage while exploring
+    }
+
+    /// <summary>The interactive FX showcase world (the --showcase CLI flag and the menu's
+    /// Showcases submenu). A static, hand-built stage (see <see cref="Core.WorldGen.FxShowcase"/>)
+    /// that demonstrates the visual effects; <see cref="World.ShowcaseController"/> maps
+    /// F5/F6/F7 to weather / time / glow. Grows each phase. No streaming, weather is manual.</summary>
+    private void StartShowcase()
+    {
+        BeginShowcaseSession(new Vector3(20, 2, 112));
+        var world = _session.World;
+        Core.WorldGen.FxShowcase(world);
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+
+        // Phase 1 — light the fire station props (one living fire of every size). The
+        // positions match the blocks placed in WorldGen.FxShowcase.
+        var fire = _session.Fire;
+        fire.AddFire(new Vector3(22.5f, 2f, 102.5f), Core.FireKind.Candle);
+        fire.AddFire(new Vector3(22.5f, 2f, 106.5f), Core.FireKind.Torch);
+        fire.AddFire(new Vector3(27.5f, 1f, 104.5f), Core.FireKind.Campfire);
+        fire.AddFire(new Vector3(24.5f, 2f, 104.5f), Core.FireKind.Forge, Core.FirePalette.Forge);
+        fire.AddFire(new Vector3(31.5f, 3f, 102.5f), Core.FireKind.Brazier);
+        fire.AddFire(new Vector3(31.5f, 4f, 106.5f), Core.FireKind.Altar);
+
+        // Label each station with a readable wooden sign (walk up and press E to read).
+        void Sign(float x, float y, float z, string title, string body) =>
+            world.AddChild(RAEngine.World.Signpost.Create(new Vector3(x, y, z), body, title));
+
+        Sign(20, 1, 104, "FX Showcase",
+            """
+            Welcome! This world demonstrates the engine's visual effects.
+
+            Controls:
+              [F5]  cycle weather (clear / rain / snow)
+              [F6]  cycle time of day
+              [F7]  cycle the bloom / glow mood
+              [H]   bless the fires (holy / forge / normal)
+              V       toggle fly
+              Shift   sprint
+
+            Walk north and read each sign with E.
+            """);
+        Sign(27, 1, 100, "Fire & Light",
+            """
+            Living fire, one of every size: a candle, a torch, a campfire, a forge,
+            a brazier and a tall altar fire. Each flickers, breathes its warm light,
+            and throws drifting embers; the bigger ones trail wind-bent smoke.
+
+            Press [H] to bless the flames into holy fire (white-gold), again for
+            forge-red, again to return. Fire reads best at dusk or night — [F6].
+            """);
+        Sign(20, 1, 95, "Footstep Dust",
+            "Walk north across the material bands — dirt, sand, stone, snow, planks, cloth. "
+            + "Each footstep kicks up a little dust tinted to that material, with its own sound.");
+        Sign(17, 1, 79, "Landing Dust",
+            "Climb the four steps onto the platform, then jump off the north edge — "
+            + "you land in a puff of dust scaled to how far you fell.");
+        Sign(6, 1, 66, "Water", "Jump into the pool for a splash and a ripple.");
+        Sign(33, 1, 61, "Bloom / Glow",
+            "These lamps emit light that blooms. Press [F7] to cycle the glow mood — Divine makes "
+            + "the whole scene radiant, Plague crushes it flat. Try it at night with [F6].");
+        Sign(20, 1, 50, "Wind & Speed",
+            "The grass leans and shimmers with the wind. Hold Shift to sprint — the view widens "
+            + "(a FOV kick) and the vignette tightens for a sense of speed.");
+        Sign(20, 1, 30, "Depth Haze",
+            "Distant terrain fades into a soft atmospheric haze, giving the world a sense of scale. "
+            + "Look north to the far ridge and compare it with the grass at your feet.");
+
+        _session.AddChild(new RAEngine.World.ShowcaseController
+        {
+            Name = "ShowcaseController", Env = _session.Env, Hud = _session.Hud, Fire = _session.Fire,
+        });
+
+        _session.Hud.ShowBanner("FX Showcase — walk to each sign and press E to read.   [F5] weather  [F6] time  [F7] glow", 8f);
+    }
+
+    /// <summary>A simple gallery of one pillar of every block type (the texture library),
+    /// reachable from the Showcases submenu.</summary>
+    private void StartBlockGallery()
+    {
+        BeginShowcaseSession(new Vector3(24, 2, 18));
+        var world = _session.World;
+        Core.WorldGen.Showcase(world);
+        world.MarkAllDirty();
+        world.RebuildAllNow();
+        world.AddChild(RAEngine.World.Signpost.Create(new Vector3(24, 1, 16),
+            "Block Gallery — one pillar of every block type"));
+        _session.Hud.ShowBanner("Block Gallery — every block type.   Esc to pause / return to menu.", 6f);
+    }
 
     /// <summary>Build (or resume) an endless, procedurally generated creative world
     /// from a save: the seed regenerates the terrain, edit-deltas are re-applied as
@@ -761,6 +913,228 @@ public partial class Game : Node3D
         GetTree().Quit(0);
     }
 
+    /// <summary>Headless: the procedural MobRig builds correct limb pivots, runs a
+    /// counter-phase walk cycle (humanoid) and diagonal gait (beast), settles to
+    /// idle, flashes, and an Enemy survives the full damage -> defeat path without
+    /// throwing. Verifies the box-rig animation refactor with no screenshot.</summary>
+    private void RunMobTest()
+    {
+        var container = new Node3D { Name = "MobTest" };
+        AddChild(container);
+
+        var human = Combat.MobModel.BuildHumanoid(
+            new Color(0.8f, 0.66f, 0.52f), new Color(0.4f, 0.4f, 0.5f), new Color(0.6f, 0.4f, 0.3f));
+        container.AddChild(human);
+        var beast = Combat.MobModel.BuildBeast(new Color(0.4f, 0.36f, 0.32f), new Color(0.6f, 0.56f, 0.5f));
+        container.AddChild(beast);
+
+        bool humanPivots = !human.Beast && human.LeftLeg != null && human.RightLeg != null
+                           && human.LeftArm != null && human.RightArm != null && human.Head != null;
+        bool beastPivots = beast.Beast && beast.Legs != null && beast.Legs.Length == 4
+                           && beast.Legs[0] != null && beast.Legs[3] != null
+                           && beast.Tail != null && beast.Head != null;
+
+        // Walk: legs swing away from rest in counter-phase.
+        for (int i = 0; i < 8; i++) human.Animate(3.5f, 0.05f);
+        float lLeg = human.LeftLeg.Rotation.X, rLeg = human.RightLeg.Rotation.X;
+        bool walks = Mathf.Abs(lLeg) > 0.01f && Mathf.Sign(lLeg) != Mathf.Sign(rLeg);
+
+        // Beast diagonal gait: front-left matches back-right, opposes front-right.
+        for (int i = 0; i < 8; i++) beast.Animate(4f, 0.05f);
+        float bx = beast.Legs[0].Rotation.X;
+        bool beastGait = Mathf.Abs(bx) > 0.01f
+                         && Mathf.Sign(bx) == Mathf.Sign(beast.Legs[3].Rotation.X)
+                         && Mathf.Sign(bx) != Mathf.Sign(beast.Legs[1].Rotation.X);
+
+        // Idle settles the legs back toward rest.
+        for (int i = 0; i < 20; i++) human.Animate(0f, 0.05f);
+        bool idleSettles = Mathf.Abs(human.LeftLeg.Rotation.X) < 0.01f;
+
+        // Flash toggles emission on the model's boxes.
+        human.SetFlash(true);
+        bool flashOn = FirstMesh(human)?.MaterialOverride is StandardMaterial3D mOn && mOn.EmissionEnabled;
+        human.SetFlash(false);
+        bool flashOff = FirstMesh(human)?.MaterialOverride is StandardMaterial3D mOff && !mOff.EmissionEnabled;
+
+        // Attack + squash tweens must not throw (the rig is in-tree).
+        bool fxOk = true;
+        try { human.Attack(); human.Squash(); beast.Attack(); beast.Squash(); }
+        catch (System.Exception ex) { fxOk = false; GD.PrintErr("[RA] mob attack/squash threw: " + ex.Message); }
+
+        // Full Enemy lifecycle: hit -> squash/flash, then lethal -> defeat.
+        bool enemyOk = true, defeated = false;
+        try
+        {
+            var giant = new Combat.Enemy { Type = Combat.EnemyType.Giant(), Target = null, Name = "MobTestGiant" };
+            container.AddChild(giant); // _Ready builds the rig
+            giant.TakeDamage(10f, null);     // non-lethal: squash + flash
+            giant.TakeDamage(99999f, null);  // lethal: defeat
+            defeated = !giant.IsAlive;
+        }
+        catch (System.Exception ex) { enemyOk = false; GD.PrintErr("[RA] enemy lifecycle threw: " + ex.Message); }
+
+        bool allPass = humanPivots && beastPivots && walks && beastGait && idleSettles
+                       && flashOn && flashOff && fxOk && enemyOk && defeated;
+        string summary = $"humanPivots={humanPivots} beastPivots={beastPivots} walks={walks} " +
+                         $"beastGait={beastGait} idleSettles={idleSettles} flashOn={flashOn} flashOff={flashOff} " +
+                         $"attackSquashOk={fxOk} enemyLifecycle={enemyOk} defeated={defeated} ALLPASS={allPass}";
+        GD.Print("[RA] mob-test: " + summary);
+        // Also write to a file: headless mono buffers stdout and can hang on exit,
+        // so a flushed file is the reliable way to read the result.
+        using (var f = FileAccess.Open("res://_mob_test.txt", FileAccess.ModeFlags.Write))
+            f?.StoreString(summary);
+        QuitSoon();
+    }
+
+    /// <summary>Headless: a chasing mob climbs a ledge to follow a target up onto a
+    /// platform instead of getting stuck at its base — the "Goliath can't chase David
+    /// onto a higher block" regression. Needs physics frames, so it's async.</summary>
+    private async void RunClimbTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var session = new GameSession { Name = "Session", LessonId = "climb-test" };
+        AddChild(session);
+        session.Setup(new Vector3(2, 5, 2), creative: false, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, 0, 32, 0, 32, 0); // top solid at y=0, feet at y=1
+        session.Player.InputEnabled = false;
+
+        // A 2-block-high platform the giant must climb onto to reach the target.
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        for (int x = 12; x <= 20; x++)
+        for (int z = 4; z <= 12; z++)
+        {
+            session.World.SetBlock(x, 1, z, stone, false);
+            session.World.SetBlock(x, 2, z, stone, false);
+        }
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+
+        var goal = new Node3D { Name = "Goal" };
+        session.World.AddChild(goal);
+        goal.GlobalPosition = new Vector3(16, 3, 8); // standing on the platform top
+
+        var giant = session.SpawnEnemy(Combat.EnemyType.Giant(), new Vector3(8, 1, 8));
+        giant.Target = goal;
+        float startY = giant.GlobalPosition.Y;
+
+        await ToSignal(GetTree().CreateTimer(4.5), SceneTreeTimer.SignalName.Timeout);
+
+        bool valid = GodotObject.IsInstanceValid(giant);
+        float endY = valid ? giant.GlobalPosition.Y : -99f;
+        float endX = valid ? giant.GlobalPosition.X : -99f;
+        bool climbed = endY >= 2.5f;   // stands on the y=2 platform (feet ~3)
+        bool advanced = endX >= 11.5f; // reached the platform, didn't stall in the field
+        bool allPass = climbed && advanced;
+        string summary = $"startY={startY:F2} endY={endY:F2} endX={endX:F2} " +
+                         $"climbed={climbed} advanced={advanced} ALLPASS={allPass}";
+        GD.Print("[RA] climb-test: " + summary);
+        using (var f = FileAccess.Open("res://_climb_test.txt", FileAccess.ModeFlags.Write))
+            f?.StoreString(summary);
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Headless: SpawnEnemy ground-snaps so a mob placed into raised terrain
+    /// (mound/pillar) stands on top instead of buried — the David &amp; Goliath
+    /// "Goliath stuck in a block" regression. Flat ground is unchanged.</summary>
+    private void RunSpawnTest()
+    {
+        Core.BlockRegistry.EnsureInit();
+        var session = new GameSession { Name = "Session", LessonId = "spawn-test" };
+        AddChild(session);
+        session.Setup(new Vector3(8, 5, 8), creative: false, captureMouse: false);
+        Core.WorldGen.FlatGround(session.World, 0, 16, 0, 16, 0); // top solid at y=0
+        session.World.SetBlock(5, 1, 5, Core.BlockRegistry.IdOf("grass"), false); // a 1-high mound
+        session.World.SetBlock(11, 1, 11, Core.BlockRegistry.IdOf("stone"), false); // a 3-high pillar
+        session.World.SetBlock(11, 2, 11, Core.BlockRegistry.IdOf("stone"), false);
+        session.World.SetBlock(11, 3, 11, Core.BlockRegistry.IdOf("stone"), false);
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+
+        // Buried spawn into the mound -> lifted to stand on top (feet y=2).
+        var onHill = session.SpawnEnemy(Combat.EnemyType.Soldier(), new Vector3(5, 1, 5));
+        bool hillClear = onHill.GlobalPosition.Y >= 2f - 0.001f;
+        // Flat ground (top y=0) -> feet y=1, unchanged.
+        var onFlat = session.SpawnEnemy(Combat.EnemyType.Soldier(), new Vector3(8, 1, 8));
+        bool flatOk = Mathf.Abs(onFlat.GlobalPosition.Y - 1f) < 0.001f;
+        // Deeper burial under a pillar -> feet y=4 (giant origin is still at the feet).
+        var onPillar = session.SpawnEnemy(Combat.EnemyType.Giant(), new Vector3(11, 1, 11));
+        bool pillarOk = onPillar.GlobalPosition.Y >= 4f - 0.001f;
+
+        bool allPass = hillClear && flatOk && pillarOk;
+        string summary = $"hillClear={hillClear}(y={onHill.GlobalPosition.Y:F2}) " +
+                         $"flatOk={flatOk}(y={onFlat.GlobalPosition.Y:F2}) " +
+                         $"pillarOk={pillarOk}(y={onPillar.GlobalPosition.Y:F2}) ALLPASS={allPass}";
+        GD.Print("[RA] spawn-test: " + summary);
+        using (var f = FileAccess.Open("res://_spawn_test.txt", FileAccess.ModeFlags.Write))
+            f?.StoreString(summary);
+        QuitSoon();
+    }
+
+    /// <summary>Headless: the rigged-glTF model path. A null/missing model scene falls
+    /// back to the procedural box model (graceful, no crash), and a real rigged scene's
+    /// clips are auto-detected and driven (walk/idle/attack), with per-instance flash and
+    /// squash. Uses a synthetic rigged scene so it needs no imported asset.</summary>
+    private void RunRiggedTest()
+    {
+        var container = new Node3D { Name = "RiggedTest" };
+        AddChild(container);
+
+        // Fallback: a null path and a bogus path must both yield the procedural box model.
+        var c = new Color(0.7f, 0.6f, 0.5f);
+        bool fallbackNull = Combat.CharacterModel.BuildHumanoid(c, c, c, null) is Combat.MobRig;
+        bool fallbackBad = Combat.CharacterModel.BuildHumanoid(c, c, c, "res://does_not_exist.glb") is Combat.MobRig;
+
+        // A synthetic rigged character: a mesh + an AnimationPlayer with named clips.
+        var root = new Node3D { Name = "Char" };
+        var mesh = new MeshInstance3D { Mesh = new BoxMesh { Material = new StandardMaterial3D() } };
+        root.AddChild(mesh);
+        var ap = new AnimationPlayer { Name = "AnimationPlayer" };
+        root.AddChild(ap);
+        var lib = new AnimationLibrary();
+        lib.AddAnimation("Idle", new Animation { Length = 0.5f });
+        lib.AddAnimation("Walk_A", new Animation { Length = 0.5f });
+        lib.AddAnimation("1H_Melee_Attack", new Animation { Length = 0.4f });
+        ap.AddAnimationLibrary("", lib);
+
+        var rm = new Combat.RiggedModel { Name = "Rig" };
+        container.AddChild(rm);
+        bool inited = rm.Init(root);
+
+        rm.Animate(3.0f, 0.016f); bool walks = ap.CurrentAnimation == "Walk_A";
+        rm.Animate(0.0f, 0.016f); bool idles = ap.CurrentAnimation == "Idle";
+        rm.Attack();              bool attacks = ap.CurrentAnimation == "1H_Melee_Attack";
+
+        rm.SetFlash(true);
+        bool flashOn = mesh.GetSurfaceOverrideMaterial(0) is StandardMaterial3D fm && fm.EmissionEnabled;
+        rm.SetFlash(false);
+        bool flashOff = mesh.GetSurfaceOverrideMaterial(0) is StandardMaterial3D fm2 && !fm2.EmissionEnabled;
+
+        bool squashOk = true;
+        try { rm.Squash(); }
+        catch (System.Exception ex) { squashOk = false; GD.PrintErr("[RA] rigged squash threw: " + ex.Message); }
+
+        bool allPass = fallbackNull && fallbackBad && inited && walks && idles && attacks
+                       && flashOn && flashOff && squashOk;
+        string summary = $"fallbackNull={fallbackNull} fallbackBad={fallbackBad} inited={inited} " +
+                         $"walks={walks} idles={idles} attacks={attacks} flashOn={flashOn} " +
+                         $"flashOff={flashOff} squashOk={squashOk} ALLPASS={allPass}";
+        GD.Print("[RA] rigged-test: " + summary);
+        using (var f = FileAccess.Open("res://_rigged_test.txt", FileAccess.ModeFlags.Write))
+            f?.StoreString(summary);
+        QuitSoon();
+    }
+
+    private static MeshInstance3D FirstMesh(Node n)
+    {
+        foreach (Node c in n.GetChildren())
+        {
+            if (c is MeshInstance3D mi) return mi;
+            var found = FirstMesh(c);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
     private async void RunCombatTest()
     {
         var session = new GameSession { Name = "Session" };
@@ -1150,7 +1524,9 @@ public partial class Game : Node3D
         }
         world.SetBlock(7, sea, 7, water);             // one source drop in a corner
 
-        await ToSignal(GetTree().CreateTimer(1.2), SceneTreeTimer.SignalName.Timeout); // let it flood
+        // Water now fills at a deliberately gradual ~12.5 cells/s, so a 27-cell basin
+        // needs a few seconds to top out (the old 1.2 s was calibrated for the faster rate).
+        await ToSignal(GetTree().CreateTimer(3.5), SceneTreeTimer.SignalName.Timeout); // let it flood
 
         int filled = 0, interior = 0;
         for (int x = 7; x <= 9; x++)
@@ -1163,6 +1539,113 @@ public partial class Game : Node3D
         bool noLeak = world.GetBlockId(8, sea + 1, 8) != water;
         GD.Print($"[RA] waterfill-test: interior={interior} filled={filled} " +
                  $"allFilled={filled == interior} noLeakAboveSea={noLeak}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Regression test for the "one-block lane won't flow" bug: opening a SINGLE
+    /// block between standing water and an empty one-wide trench at sea level must let the
+    /// water flow through on that one edit alone. Before the fix you had to break a second
+    /// adjacent block to re-seed the fill (EnqueueWaterArea seeded only the neighbours of an
+    /// edited cell, never the cell itself), so a one-wide lane drilled into a lake sat dry.</summary>
+    private async void RunWaterLaneTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        var gen = new Core.TerrainGenerator(2024);
+        var target = new Node3D { Name = "T" };
+        AddChild(target);
+        target.GlobalPosition = new Vector3(8, 40, 8);
+        world.StartStreaming(gen, target, 3, -1, 3);
+        world.EnsureSpawnArea(new Vector3(8, 0, 8), 2);
+        await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
+
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        ushort water = Core.BlockRegistry.IdOf("water");
+        int sea = Core.TerrainGenerator.SeaLevel;   // 26
+        const int z = 6;
+
+        // A fully stone-boxed channel along X at z=6, y=sea, with a stone floor below:
+        //   x=4 endcap | x=5 reservoir(water) | x=6 WALL | x=7..10 empty trench | x=11 endcap
+        // z=5 and z=7 are solid side walls. Nothing can leak out, so the only way the trench
+        // fills is the single wall break propagating water down the one-wide lane.
+        for (int x = 4; x <= 11; x++)
+        {
+            world.SetBlock(x, sea - 1, z, stone);   // floor
+            world.SetBlock(x, sea, z, stone);       // start fully solid
+            world.SetBlock(x, sea, z - 1, stone);   // side wall
+            world.SetBlock(x, sea, z + 1, stone);   // side wall
+        }
+        world.SetBlock(5, sea, z, water);                          // reservoir cell
+        for (int x = 7; x <= 10; x++) world.SetBlock(x, sea, z, 0); // 1-wide empty trench
+        // x=6 stays stone: the single wall the player will break.
+
+        await ToSignal(GetTree().CreateTimer(0.4), SceneTreeTimer.SignalName.Timeout); // settle
+        int before = 0;
+        for (int x = 6; x <= 10; x++) if (world.GetBlockId(x, sea, z) == water) before++;
+
+        world.SetBlock(6, sea, z, 0);               // break the ONE wall block
+        await ToSignal(GetTree().CreateTimer(2.0), SceneTreeTimer.SignalName.Timeout); // let it flow
+
+        int after = 0;
+        for (int x = 6; x <= 10; x++) if (world.GetBlockId(x, sea, z) == water) after++;
+        GD.Print($"[RA] waterlane-test: filledBeforeBreak={before} filledAfterSingleBreak={after} " +
+                 $"expected=5 pass={before == 0 && after == 5}");
+        GetTree().Quit(0);
+    }
+
+    /// <summary>Verifies the depth-first fill ORDER: water must fill the deepest reachable
+    /// cell before any shallower one. A 3-deep vertical shaft and one higher lateral cell
+    /// are all reachable from a single source; draining one cell at a time must fill
+    /// bottom-up — shaft cells deepest-first, the higher lateral cell last.</summary>
+    private async void RunWaterDepthTest()
+    {
+        Core.Scenery.AddDaylight(this);
+        var world = new Core.VoxelWorld { Name = "World" };
+        AddChild(world);
+        var gen = new Core.TerrainGenerator(2024);
+        var target = new Node3D { Name = "T" };
+        AddChild(target);
+        target.GlobalPosition = new Vector3(8, 40, 8);
+        world.StartStreaming(gen, target, 3, -1, 3);
+        world.EnsureSpawnArea(new Vector3(8, 0, 8), 2);
+        await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
+
+        ushort stone = Core.BlockRegistry.IdOf("stone");
+        ushort water = Core.BlockRegistry.IdOf("water");
+        int sea = Core.TerrainGenerator.SeaLevel;   // 26
+
+        // A solid stone block around (8, sea, 8); we carve exactly three air cells out of
+        // it so only those three are reachable from the source:
+        //   A = (8, sea-1)  shaft, just below the source
+        //   C = (8, sea-2)  shaft bottom (deepest; reachable only once A holds water)
+        //   B = (9, sea)    a lateral cell at the source's own height (shallowest)
+        for (int x = 6; x <= 10; x++)
+        for (int z = 6; z <= 10; z++)
+        for (int y = sea - 3; y <= sea + 1; y++)
+            world.SetBlock(x, y, z, stone);
+        world.SetBlock(8, sea - 1, 8, 0);   // A
+        world.SetBlock(8, sea - 2, 8, 0);   // C
+        world.SetBlock(9, sea, 8, 0);       // B
+        world.SetBlock(8, sea, 8, water);   // source on top of the shaft, beside B
+
+        // Drain ONE cell at a time (no awaits between, so the per-frame pump never
+        // interleaves) and confirm the order is strictly deepest-first.
+        int n1 = world.DrainWaterForTest(1);
+        bool step1 = world.GetBlockId(8, sea - 1, 8) == water   // A filled first (deepest reachable)
+                  && world.GetBlockId(8, sea - 2, 8) != water   // C not reachable until A holds water
+                  && world.GetBlockId(9, sea, 8) != water;      // B (higher) still air
+
+        int n2 = world.DrainWaterForTest(1);
+        bool step2 = world.GetBlockId(8, sea - 2, 8) == water   // C now deepest reachable -> filled
+                  && world.GetBlockId(9, sea, 8) != water;      // B still air
+
+        int n3 = world.DrainWaterForTest(1);
+        bool step3 = world.GetBlockId(9, sea, 8) == water;      // B (shallowest) filled last
+
+        bool pass = n1 == 1 && n2 == 1 && n3 == 1 && step1 && step2 && step3;
+        GD.Print($"[RA] waterdepth-test: step1={step1} step2={step2} step3={step3} " +
+                 $"placed=({n1},{n2},{n3}) bottomUp={pass}");
         GetTree().Quit(0);
     }
 
@@ -1402,6 +1885,50 @@ public partial class Game : Node3D
         GetTree().Quit(0);
     }
 
+    /// <summary>Terraced-water test: a flooded descending staircase (one-deep pools at
+    /// each step) viewed from above, so the stacked translucent water surfaces — the
+    /// case that showed view-dependent triangular facets — are on screen for a check.</summary>
+    private async void RunWaterStepTest()
+    {
+        var session = new GameSession { Name = "Session" };
+        AddChild(session);
+        session.Setup(new Vector3(7, 6, 1), creative: true, captureMouse: false);
+        ushort sand = Core.BlockRegistry.IdOf("sand");
+        ushort water = Core.BlockRegistry.IdOf("water");
+        const int W = 14, N = 10;
+
+        // A solid sand massif to carve the flooded staircase into.
+        for (int x = -2; x <= W + 2; x++)
+        for (int z = -2; z <= N + 3; z++)
+        for (int y = -N - 1; y <= 0; y++)
+            session.World.SetBlock(x, y, z, sand, false);
+
+        // Descending staircase in +Z: tread i sits at floor y=-i (row z=i+1), open air
+        // above it and all lower treads, with a one-block-deep water pool on the tread.
+        // This terraces the water and exposes a vertical water face on each tread's front
+        // edge — the exact geometry that produced the facets.
+        for (int i = 0; i < N; i++)
+        {
+            int y = -i;
+            for (int x = 0; x <= W; x++)
+            for (int z = i + 1; z <= N + 3; z++)
+                for (int yy = 0; yy >= y; yy--)
+                    session.World.SetBlock(x, yy, z, 0, false); // carve air above this + lower treads
+            for (int x = 0; x <= W; x++)
+                session.World.SetBlock(x, y, i + 1, water, false); // one-deep pool on this tread
+        }
+        session.World.MarkAllDirty();
+        session.World.RebuildAllNow();
+        session.Env.SetFixedTime(Core.EnvironmentController.Noon);
+
+        // Stand above the top of the stairs, face +Z (down the staircase) and pitch down.
+        session.Player.GlobalPosition = new Vector3(7, 4, -1);
+        session.Player.Rotation = new Vector3(0, Mathf.Pi, 0);
+        session.Player.Head.Rotation = new Vector3(-0.6f, 0, 0);
+        await Capture("res://_waterstep.png", 0.8);
+        GetTree().Quit(0);
+    }
+
     /// <summary>Phase-5 sky render test: screenshot the world at noon, dusk and night
     /// to eyeball the sky shader (sun, clouds, stars) and the lighting swing.</summary>
     private async void RunSkyTest()
@@ -1430,6 +1957,13 @@ public partial class Game : Node3D
         session.Player.Head.Rotation = new Vector3(0.55f, 0, 0);
         session.Env.SetFixedTime(0.85f);
         await Capture("res://_sky_moon.png", 0.6);
+
+        // STARS: deep midnight, look high up, clouds cleared (cloud_coverage well below 0
+        // pushes the cloud threshold past the noise range) so the star field is unobstructed.
+        session.Player.Head.Rotation = new Vector3(1.1f, 0, 0);
+        session.Env.SetFixedTime(Core.EnvironmentController.Night);
+        session.Env.SkyMaterial?.SetShaderParameter("cloud_coverage", -2.0f);
+        await Capture("res://_sky_stars.png", 0.6);
 
         GD.Print("[RA] sky-test: done");
         GetTree().Quit(0);

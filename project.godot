@@ -25,3 +25,8 @@ project/assembly_name="RA Engine"
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
+
+[physics]
+
+common/physics_ticks_per_second=240
+common/physics_jitter_fix=0.0
