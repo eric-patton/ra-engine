@@ -128,24 +128,23 @@ void fragment() {
     // down at different speeds + a per-lane random phase + a domain warp, quantised into a few
     // bands. This replaces the old periodic sin-grid that read as a tiled "U-cup" texture.
     if (!top && v_fall > 0.4) {
-        float lane = floor(v_across * 2.2);
-        float lh = hash13(vec3(lane, 1.7, 2.3));                     // per-lane random
-        // + TIME on the vertical term so the streaks scroll DOWNWARD (the water falls).
-        float warp = fbm2(vec2(v_across * 0.7, v_wpos.y * 0.2 + TIME * 0.3)) - 0.5;
-        float ax = v_across * 1.3 + warp * 0.7;                      // domain-warped horizontal
-        float a = fbm2(vec2(ax * 1.2, v_wpos.y * 1.0 + TIME * (fall_speed * 0.7 + lh * 0.5) + lh * 9.0));
-        float b = fbm2(vec2(ax * 2.6, v_wpos.y * 1.9 + TIME * fall_speed * 1.2));
-        float streaks = a * 0.6 + b * 0.4;
-        // OPAQUE, vibrant cyan→white whitewater (its own colour, not the translucent pond water).
-        // Matte (high roughness) so it doesn't mirror the sky like a pane of glass.
-        vec3 col = mix(fall_color, foam_color, smoothstep(0.22, 0.70, streaks));
-        // churning white foam at the lip (top of the curtain) where it pours over the brink.
-        float churn = fbm2(vec2(ax * 2.0, v_wpos.y * 3.0 + TIME * fall_speed * 2.2));
-        if (v_fall < 0.75) col = mix(col, foam_color, smoothstep(0.22, 0.55, churn));
+        // Voxel whitewater: quantise the falling sheet into ~0.45 m cube cells that march
+        // downward — each cube either vibrant cyan or white foam, with per-column character and
+        // per-cube shading — so it reads as falling CUBES (the blocky aesthetic), not a smooth
+        // sheet. Opaque: you should not see through a waterfall.
+        float cells = 2.2;                                          // cube cells per metre
+        float colId = floor(v_across * cells);
+        float colH = hash13(vec3(colId, 3.1, 0.0));                 // each column's character
+        float rowId = floor(v_wpos.y * cells + TIME * fall_speed * 2.0); // marches down over time
+        float cellRand = hash13(vec3(colId, rowId, 7.0));
+        float foamAmt = step(0.5, cellRand * 0.6 + colH * 0.4 + 0.12);   // white foam vs cyan cube
+        float shade = 0.86 + 0.14 * hash13(vec3(colId, rowId, 13.0));    // per-cube brightness
+        vec3 col = mix(fall_color, foam_color, foamAmt) * shade;
+        if (v_fall < 0.75) col = mix(col, foam_color, 0.5);        // brink: foamier where it pours over
         ALBEDO = col;
-        ROUGHNESS = 0.6;
-        SPECULAR = 0.15;
+        ROUGHNESS = 0.65;
+        SPECULAR = 0.12;
         METALLIC = 0.0;
-        ALPHA = 0.97;   // opaque falling water — you should not see through a waterfall
+        ALPHA = 0.97;
     }
 }
