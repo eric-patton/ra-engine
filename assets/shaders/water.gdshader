@@ -124,27 +124,16 @@ void fragment() {
         ALBEDO = mix(ALBEDO, foam_color, clamp(foam, 0.0, 0.95));
     }
 
-    // B2 — waterfall curtain: aperiodic vertical foam streaks. Multiple fbm layers scrolling
-    // down at different speeds + a per-lane random phase + a domain warp, quantised into a few
-    // bands. This replaces the old periodic sin-grid that read as a tiled "U-cup" texture.
+    // B2 — waterfall curtain BACKING. The 3D voxel churn (ChurnWater MultiMesh + churn.gdshader)
+    // now carries the falling-water look as real translucent sub-cubes; this flat face is only a
+    // calm translucent cyan backing behind them, so the column reads solid with no see-through
+    // holes. Kept deliberately plain — the old scrolling cube-cell texture read as a flat sheet,
+    // which was exactly the problem.
     if (!top && v_fall > 0.4) {
-        // Voxel whitewater: quantise the falling sheet into ~0.45 m cube cells that march
-        // downward — each cube either vibrant cyan or white foam, with per-column character and
-        // per-cube shading — so it reads as falling CUBES (the blocky aesthetic), not a smooth
-        // sheet. Opaque: you should not see through a waterfall.
-        float cells = 2.2;                                          // cube cells per metre
-        float colId = floor(v_across * cells);
-        float colH = hash13(vec3(colId, 3.1, 0.0));                 // each column's character
-        float rowId = floor(v_wpos.y * cells + TIME * fall_speed * 2.0); // marches down over time
-        float cellRand = hash13(vec3(colId, rowId, 7.0));
-        float foamAmt = step(0.5, cellRand * 0.6 + colH * 0.4 + 0.12);   // white foam vs cyan cube
-        float shade = 0.86 + 0.14 * hash13(vec3(colId, rowId, 13.0));    // per-cube brightness
-        vec3 col = mix(fall_color, foam_color, foamAmt) * shade;
-        if (v_fall < 0.75) col = mix(col, foam_color, 0.5);        // brink: foamier where it pours over
-        ALBEDO = col;
-        ROUGHNESS = 0.65;
-        SPECULAR = 0.12;
+        ALBEDO = fall_color;
+        ROUGHNESS = 0.25;
+        SPECULAR = 0.3;
         METALLIC = 0.0;
-        ALPHA = 0.97;
+        ALPHA = 0.5;
     }
 }
