@@ -12,23 +12,23 @@ namespace RAEngine.World;
 /// rendered through ONE <see cref="MultiMeshInstance3D"/>.
 ///
 /// The field is BAKED once over the static showcase water — no per-frame fluid sim, no per-frame
-/// buffer upload. We classify each water cell as a falling CURTAIN (a vertical sheet) or surface
-/// FOAM (turbulence radiating out from where a fall lands, via BFS), then emit sub-cubes. In this
-/// blocky world the cascade is a solid water staircase, so "air directly below" finds nothing; the
-/// real signal for falling water is an exposed vertical face with water above it.
-///
-/// Per cube we bake a static off-lattice jitter, a random size, and ~30-40% dropout so the body is
-/// broken up in space and never flickers. All MOTION is in the shader and DIRECTIONAL: falls stream
-/// straight DOWN; foam streams DOWNSTREAM + sideways (never upstream) and only over interior water,
-/// so it can't flow backward over the brink or bleed onto the surrounding ground (churn.gdshader).
+/// buffer upload. We classify each water cell and give every cube a static jitter/size/dropout (so
+/// the body is broken up in space and never flickers) plus a flow angle + state that the shader
+/// turns into directional motion (churn.gdshader):
+///   • CURTAIN cells (an exposed vertical face with water above) → cubes that stream straight DOWN.
+///   • POOL foam → cubes that flow toward the pool's own LIP (a BFS flow field), so water heads to
+///     where it spills over instead of drifting sideways or off the edge. The terminal base pool
+///     (no lip) keeps a gentle spread out from the impact.
+///   • LIP corners (a surface cell with a curtain directly below) → SPILL cubes that arc over the
+///     edge and plunge, bridging the pool→fall transition.
 /// </summary>
 public static class ChurnWater
 {
-    private const int Sub = 4;            // sub-cubes per axis across a 1 m macro-cell (finer = smaller cubes)
+    private const int Sub = 4;            // sub-cubes per axis across a 1 m macro-cell
     private const float Step = 1f / Sub;
-    private const float Jitter = 0.30f;   // static off-lattice spread, in cell fractions
+    private const float Jitter = 0.30f;
 
-    private enum State { Falling = 0, Edge = 1, Impact = 2, Spread = 3 }
+    private enum State { Falling = 0, Edge = 1, Impact = 2, Spread = 3, Spill = 4 }
 
     private struct Inst { public Vector3 Pos; public Vector3 Scale; public Color Data; }
 
@@ -54,9 +54,10 @@ public static class ChurnWater
         bool IsAir(int x, int y, int z) => world.GetBlockId(x, y, z) == 0;
         (int dx, int dz)[] horiz = { (1, 0), (-1, 0), (0, 1), (0, -1) };
 
-        // 2a. CURTAINS — water with water directly above AND an exposed (air) vertical side.
-        var curtains = new List<(Vector3I p, Vector3I outDir)>();
-        var curtainSet = new HashSet<Vector3I>();
+        // 2a. CURTAINS — water with water directly above AND an exposed (air) vertical side. outDir
+        // is the spill direction across the exposed face(s).
+        var curtains = new List<(Vector3I p, Vector3 outN)>();
+        var curtainOut = new Dictionary<Vector3I, Vector3>();   // curtain cell -> spill direction
         foreach (var p in water)
         {
             if (!IsWater(p.X, p.Y + 1, p.Z)) continue;
@@ -64,26 +65,51 @@ public static class ChurnWater
             foreach (var (dx, dz) in horiz)
                 if (IsAir(p.X + dx, p.Y, p.Z + dz)) outDir += new Vector3I(dx, 0, dz);
             if (outDir == Vector3I.Zero) continue;
-            curtains.Add((p, outDir));
-            curtainSet.Add(p);
+            var outN = new Vector3(Mathf.Sign(outDir.X), 0, Mathf.Sign(outDir.Z));
+            outN = outN.Length() > 0.001f ? outN.Normalized() : new Vector3(0, 0, 1);
+            curtains.Add((p, outN));
+            curtainOut[p] = outN;
         }
 
-        // Dominant spill (downstream) direction — the average of all curtain exits. Foam is steered
-        // toward this and never allowed upstream, so the top can't flow backward over the brink.
         Vector3 spill = Vector3.Zero;
-        foreach (var (_, outDir) in curtains)
-            spill += new Vector3(Mathf.Sign(outDir.X), 0, Mathf.Sign(outDir.Z));
+        foreach (var (_, outN) in curtains) spill += outN;
         spill = spill.Length() > 0.001f ? spill.Normalized() : new Vector3(0, 0, 1);
         float spillAng = Angle01(spill.X, spill.Z);
 
         // Surface cells = water with air (non-water) above — foam rides here.
         var surface = new HashSet<Vector3I>();
         foreach (var p in water)
-            if (!IsWater(p.X, p.Y + 1, p.Z) && !curtainSet.Contains(p))
+            if (!IsWater(p.X, p.Y + 1, p.Z) && !curtainOut.ContainsKey(p))
                 surface.Add(p);
 
-        // 2b. Seed surface-foam turbulence: 10 where a fall lands (IMPACT), 6 at the brink. Remember
-        // impact XZ so foam can radiate from it.
+        // 2b. LIPS — a surface cell with a curtain directly below is where its pool spills over. Each
+        // remembers the over-edge direction (the curtain's spill dir).
+        var lips = new Dictionary<Vector3I, Vector3>();
+        foreach (var s in surface)
+            if (curtainOut.TryGetValue(new Vector3I(s.X, s.Y - 1, s.Z), out var od))
+                lips[s] = od;
+
+        // 2c. Flow field: BFS out from the lips so every reachable pool cell flows TOWARD its lip
+        // (i.e. toward where the water spills over). Cells no lip can reach (the terminal base pool)
+        // are left out and fall back to spreading from the impact.
+        var flowAngle = new Dictionary<Vector3I, float>();
+        var fq = new Queue<Vector3I>();
+        foreach (var (lip, od) in lips) { flowAngle[lip] = Angle01(od.X, od.Z); fq.Enqueue(lip); }
+        while (fq.Count > 0)
+        {
+            var c = fq.Dequeue();
+            foreach (var (dx, dz) in horiz)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    var n = new Vector3I(c.X + dx, c.Y + dy, c.Z + dz);
+                    if (!surface.Contains(n) || flowAngle.ContainsKey(n)) continue;
+                    flowAngle[n] = Angle01(c.X - n.X, c.Z - n.Z);   // n flows back toward c (toward the lip)
+                    fq.Enqueue(n);
+                }
+        }
+
+        // 2d. Seed surface-foam turbulence: 10 where a fall lands (IMPACT), 6 at the brink. Remember
+        // impact XZ for the base-pool fallback spread.
         var turb = new Dictionary<Vector3I, float>();
         var impacts = new HashSet<Vector2I>();
         void Seed(Vector3I p, float t)
@@ -91,19 +117,18 @@ public static class ChurnWater
             if (!surface.Contains(p)) return;
             turb[p] = Mathf.Max(turb.TryGetValue(p, out var e) ? e : 0f, t);
         }
-        foreach (var (p, outDir) in curtains)
+        foreach (var (p, outN) in curtains)
         {
             foreach (var (dx, dz) in horiz)
                 for (int dy = -1; dy <= 1; dy++)
                     Seed(new Vector3I(p.X + dx, p.Y + dy, p.Z + dz), 6f);
 
-            int sx = Mathf.Sign(outDir.X), sz = Mathf.Sign(outDir.Z);
+            int sx = (int)Mathf.Sign(outN.X), sz = (int)Mathf.Sign(outN.Z);
             for (int y = p.Y; y >= p.Y - 24; y--)
                 if (IsWater(p.X + sx, y, p.Z + sz) && !IsWater(p.X + sx, y + 1, p.Z + sz))
                 { Seed(new Vector3I(p.X + sx, y, p.Z + sz), 10f); impacts.Add(new Vector2I(p.X + sx, p.Z + sz)); break; }
         }
 
-        // 2c. Spread turbulence over the pool surface (BFS, decaying ~2 per block).
         var queue = new Queue<Vector3I>(turb.Keys);
         while (queue.Count > 0)
         {
@@ -120,21 +145,13 @@ public static class ChurnWater
                 }
         }
 
-        // Helpers for foam emission.
-        bool Interior(Vector3I c)                                // all 4 horizontal neighbours are water
+        bool Interior(Vector3I c)
         {
             foreach (var (dx, dz) in horiz)
                 if (!water.Contains(new Vector3I(c.X + dx, c.Y, c.Z + dz))) return false;
             return true;
         }
-        bool NearCurtain(Vector3I c)                             // a lip cell, right beside the drop
-        {
-            foreach (var (dx, dz) in horiz)
-                for (int dy = -1; dy <= 1; dy++)
-                    if (curtainSet.Contains(new Vector3I(c.X + dx, c.Y + dy, c.Z + dz))) return true;
-            return false;
-        }
-        float FoamFlowAngle(Vector3I cell)
+        float SpreadAngle(Vector3I cell)   // base-pool fallback: outward from impact, never upstream
         {
             float bestD = float.MaxValue; Vector2I best = default; bool found = false;
             foreach (var im in impacts)
@@ -148,41 +165,47 @@ public static class ChurnWater
             away = away.Normalized();
             var sp = new Vector2(spill.X, spill.Z);
             float along = away.Dot(sp);
-            Vector2 res = (away - sp * along) + sp * Mathf.Max(along, 0f);   // strip the upstream part
+            Vector2 res = (away - sp * along) + sp * Mathf.Max(along, 0f);
             return res.Length() < 0.05f ? spillAng : Angle01(res.X, res.Y);
         }
 
         // 3. Emit sub-cubes.
         var insts = new List<Inst>();
+        var foamScale = new Vector3(Step * 0.9f, Step * 0.9f, Step * 0.9f);
 
-        // Curtains → tall, slim streak cubes that stream straight down. Nudged out past the water
-        // face so they stand proud of the flat backing.
-        foreach (var (p, outDir) in curtains)
-        {
-            var outN = new Vector3(Mathf.Sign(outDir.X), 0, Mathf.Sign(outDir.Z));
-            outN = outN.Length() > 0.001f ? outN.Normalized() : new Vector3(0, 0, 1);
+        // Curtains → tall, slim streak cubes that stream straight down, stood proud of the backing.
+        foreach (var (p, outN) in curtains)
             for (int i = 0; i < Sub; i++)
             for (int k = 0; k < Sub; k++)
                 Emit(insts, new Vector3(p.X + (i + 0.5f) * Step, p.Y + 0.5f, p.Z + (k + 0.5f) * Step) + outN * 0.18f,
                     new Vector3(Step * 0.85f, Step * 2.0f, Step * 0.85f), 0.9f, State.Falling, 0f, p, i * Sub + k);
+
+        // Lips → SPILL cubes arcing over the edge and plunging, bridging pool→fall.
+        foreach (var (lip, od) in lips)
+        {
+            float ang = Angle01(od.X, od.Z);
+            for (int i = 0; i < Sub; i++)
+            for (int k = 0; k < Sub; k++)
+                Emit(insts, new Vector3(lip.X + (i + 0.5f) * Step, lip.Y + 1f, lip.Z + (k + 0.5f) * Step) + od * 0.4f,
+                    foamScale, 0.9f, State.Spill, ang, lip, 90 + i * Sub + k);
         }
 
-        // Foam → small cubes riding the pool surface that drift downstream/outward and fade. Only on
-        // interior water or right at a lip, so they never bleed onto the surrounding ground.
+        // Foam on the rest of each pool → flows toward the lip (or spreads at the base pool).
         foreach (var (c, t) in turb)
         {
-            if (t <= 0f) continue;
-            bool lip = NearCurtain(c);
-            if (!lip && !Interior(c)) continue;
+            if (t <= 0f || lips.ContainsKey(c)) continue;
+            bool nearLip = false;
+            foreach (var (dx, dz) in horiz)
+                if (lips.ContainsKey(new Vector3I(c.X + dx, c.Y, c.Z + dz))) { nearLip = true; break; }
+            if (!nearLip && !Interior(c)) continue;
             State s = t >= 8f ? State.Impact : t >= 4f ? State.Edge : State.Spread;
             int layers = t >= 8f ? 2 : 1;
-            float ang = FoamFlowAngle(c);
+            float ang = flowAngle.TryGetValue(c, out var fa) ? fa : SpreadAngle(c);
             for (int L = 0; L < layers; L++)
             for (int i = 0; i < Sub; i++)
             for (int k = 0; k < Sub; k++)
                 Emit(insts, new Vector3(c.X + (i + 0.5f) * Step, c.Y + 1f + L * Step, c.Z + (k + 0.5f) * Step),
-                    new Vector3(Step * 0.9f, Step * 0.9f, Step * 0.9f),
-                    Mathf.Clamp(t / 10f, 0.15f, 1f), s, ang, c, L * 137 + i * Sub + k);
+                    foamScale, Mathf.Clamp(t / 10f, 0.15f, 1f), s, ang, c, L * 137 + i * Sub + k);
         }
 
         if (insts.Count == 0) return root;
@@ -210,8 +233,6 @@ public static class ChurnWater
         return root;
     }
 
-    // Bake one sub-cube with a static off-lattice jitter, a static size, and ~30-40% dropout, so the
-    // grid is broken in SPACE and never flickers. flowAngle01 + state drive the shader's motion.
     private static void Emit(List<Inst> list, Vector3 basePos, Vector3 baseScale, float turb, State s,
         float flowAngle01, Vector3I cell, int sub)
     {
@@ -223,7 +244,7 @@ public static class ChurnWater
         float jx = (h >> 8 & 0xFF) / 255f - 0.5f;
         float jz = (h >> 16 & 0xFF) / 255f - 0.5f;
         float jy = (h >> 24 & 0xFF) / 255f - 0.5f;
-        float sizef = 0.55f + (h2 >> 16 & 0xFF) / 255f * 0.55f;    // 0.55 .. 1.10 (smaller, tighter range)
+        float sizef = 0.55f + (h2 >> 16 & 0xFF) / 255f * 0.55f;
         float seed = (h2 & 0xFFFF) / 65535f;
 
         list.Add(new Inst
