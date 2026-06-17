@@ -412,6 +412,7 @@ public partial class Player : CharacterBody3D, IDamageable
         {
             AudioManager.Play("splash");
             Fx.Burst(GlobalPosition, FxKind.Splash, new Color(0.72f, 0.86f, 1f), 24);
+            Fx.Ring(GlobalPosition, new Color(0.85f, 0.92f, 1f, 0.9f), 1.9f, 0.7f); // B13 surface ring
             Fx.Shake(0.08f);
         }
         if (_bubbles != null) _bubbles.Emitting = HeadUnderwater; // bubbles only while submerged

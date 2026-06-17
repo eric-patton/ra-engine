@@ -102,7 +102,7 @@ public partial class WeaponController : Node3D
         Vector3 fwd = -cam.GlobalTransform.Basis.Z;
         Vector3 vel = (fwd + Vector3.Up * Current.ProjectileArc).Normalized() * Current.ProjectileSpeed;
         Vector3 origin = cam.GlobalPosition + fwd * 0.6f;
-        Projectile.Spawn(ProjectileParent ?? GetTree().Root, origin, vel, Current.Damage, Player);
+        Projectile.Spawn(ProjectileParent ?? GetTree().Root, origin, vel, Current.Damage, Player, world: Player?.World);
     }
 
     private void AnimateSwing()

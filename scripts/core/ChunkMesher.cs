@@ -113,6 +113,12 @@ public static class ChunkMesher
         var solidArr = new bool[N * N];
         var aoFlat = new int[N * N];        // 0..3 uniform level, or -1 when the AO varies
         var aoCorners = new int[N * N * 4]; // per-corner levels, used for the 1×1 path
+        // Per-cell water FX packed into the free Custom.b / Custom.a float channels:
+        //   top faces  → (flow.x, flow.z): a unit-ish current direction for B1 rivers.
+        //   side faces → (0, fall): fall = 1 on the vertical sheet of a falling waterfall (B2).
+        // Still water computes flow 0 everywhere, so its faces merge exactly as before.
+        var cBArr = new float[N * N];
+        var cAArr = new float[N * N];
 
         for (int f = 0; f < 6; f++)
         {
@@ -145,6 +151,19 @@ public static class ChunkMesher
                     waterArr[m] = water;
                     solidArr[m] = self.Solid;
 
+                    // Water FX channels (zero for everything else, so non-water merging is unchanged).
+                    float cB = 0f, cA = 0f;
+                    if (water)
+                    {
+                        if (nrm.Y > 0)                                       // top surface → river flow
+                            ComputeFlow(snap, cell, out cB, out cA);
+                        else if (nrm.Y == 0 &&                               // vertical sheet with water above
+                                 BlockRegistry.Get(snap.Get(cell.X, cell.Y + 1, cell.Z)).Render == RenderType.Water)
+                            cA = 1f;                                         // → a waterfall curtain (B2)
+                    }
+                    cBArr[m] = cB;
+                    cAArr[m] = cA;
+
                     int l0, l1, l2, l3;
                     if (water)
                     {
@@ -176,17 +195,19 @@ public static class ChunkMesher
                     if (aoFlat[m] < 0)
                     {
                         EmitQuad(md, f, baseCell, 1, 1, layerArr[m], waterArr[m], solidArr[m],
-                            aoCorners[m * 4], aoCorners[m * 4 + 1], aoCorners[m * 4 + 2], aoCorners[m * 4 + 3]);
+                            aoCorners[m * 4], aoCorners[m * 4 + 1], aoCorners[m * 4 + 2], aoCorners[m * 4 + 3],
+                            cBArr[m], cAArr[m]);
                         used[m] = true;
                         continue;
                     }
 
                     int kLayer = layerArr[m], kAo = aoFlat[m];
                     bool kWater = waterArr[m], kSolid = solidArr[m];
+                    float kcB = cBArr[m], kcA = cAArr[m];
 
                     int w = 1;
                     while (i + w < N && Mergeable(j * N + i + w, has, used, aoFlat, layerArr, waterArr, solidArr,
-                               kAo, kLayer, kWater, kSolid))
+                               cBArr, cAArr, kAo, kLayer, kWater, kSolid, kcB, kcA))
                         w++;
 
                     int h = 1;
@@ -195,7 +216,7 @@ public static class ChunkMesher
                     {
                         for (int k = 0; k < w; k++)
                             if (!Mergeable((j + h) * N + i + k, has, used, aoFlat, layerArr, waterArr, solidArr,
-                                    kAo, kLayer, kWater, kSolid))
+                                    cBArr, cAArr, kAo, kLayer, kWater, kSolid, kcB, kcA))
                             { stop = true; break; }
                         if (!stop) h++;
                     }
@@ -204,7 +225,7 @@ public static class ChunkMesher
                     for (int ii = i; ii < i + w; ii++)
                         used[jj * N + ii] = true;
 
-                    EmitQuad(md, f, baseCell, w, h, kLayer, kWater, kSolid, kAo, kAo, kAo, kAo);
+                    EmitQuad(md, f, baseCell, w, h, kLayer, kWater, kSolid, kAo, kAo, kAo, kAo, kcB, kcA);
                 }
             }
         }
@@ -233,10 +254,42 @@ public static class ChunkMesher
     }
 
     private static bool Mergeable(int m, bool[] has, bool[] used, int[] aoFlat,
-        int[] layerArr, bool[] waterArr, bool[] solidArr,
-        int kAo, int kLayer, bool kWater, bool kSolid) =>
+        int[] layerArr, bool[] waterArr, bool[] solidArr, float[] cBArr, float[] cAArr,
+        int kAo, int kLayer, bool kWater, bool kSolid, float kcB, float kcA) =>
         has[m] && !used[m] && aoFlat[m] == kAo && layerArr[m] == kLayer
-        && waterArr[m] == kWater && solidArr[m] == kSolid;
+        && waterArr[m] == kWater && solidArr[m] == kSolid
+        // Water faces only merge when their flow/fall channels match too, so a river's
+        // varying current splits into per-cell quads while a still pond stays one quad.
+        && cBArr[m] == kcB && cAArr[m] == kcA;
+
+    /// <summary>A water surface cell's current direction for B1 flowing rivers, derived from
+    /// the static block field: water spills toward any horizontal side that is open air,
+    /// and pulls harder toward a side that also drops away (a waterfall lip). Returns a
+    /// unit-ish vector whose length (0..1) is the current strength — 0 for enclosed/still
+    /// water, which keeps that face mergeable. Output is discrete (few neighbour patterns),
+    /// so adjacent equal-current cells share one value and merge.</summary>
+    private static void ComputeFlow(Snapshot snap, Vector3I c, out float fx, out float fz)
+    {
+        fx = 0f; fz = 0f;
+        AccumFlow(snap, c, 1, 0, ref fx, ref fz);
+        AccumFlow(snap, c, -1, 0, ref fx, ref fz);
+        AccumFlow(snap, c, 0, 1, ref fx, ref fz);
+        AccumFlow(snap, c, 0, -1, ref fx, ref fz);
+        float len = Mathf.Sqrt(fx * fx + fz * fz);
+        if (len > 0.0001f)
+        {
+            float intensity = Mathf.Min(len / 2f, 1f);
+            fx = fx / len * intensity;
+            fz = fz / len * intensity;
+        }
+    }
+
+    private static void AccumFlow(Snapshot snap, Vector3I c, int dx, int dz, ref float fx, ref float fz)
+    {
+        if (snap.Get(c.X + dx, c.Y, c.Z + dz) != 0) return;     // blocked (solid or water) — no spill
+        float w = snap.Get(c.X + dx, c.Y - 1, c.Z + dz) == 0 ? 2f : 1f; // a drop past the edge pulls harder
+        fx += dx * w; fz += dz * w;
+    }
 
     /// <summary>Emit one (possibly merged) quad of <paramref name="w"/>×<paramref name="h"/>
     /// cells. The quad runs <paramref name="w"/> cells along the face's du axis and
@@ -244,7 +297,7 @@ public static class ChunkMesher
     /// (the shader samples with repeat). Corner AO levels are passed explicitly so
     /// the gradient (1×1) and uniform (merged) paths share one code path.</summary>
     private static void EmitQuad(MeshData md, int f, Vector3I baseCell, int w, int h,
-        int layer, bool water, bool solid, int ao0, int ao1, int ao2, int ao3)
+        int layer, bool water, bool solid, int ao0, int ao1, int ao2, int ao3, float cB, float cA)
     {
         Surface surf = water ? md.Water : md.Opaque;
         int baseIdx = surf.Count;
@@ -296,10 +349,10 @@ public static class ChunkMesher
             uv3 = new Vector2(h3 - minH, maxY - p3.Y);
         }
 
-        surf.AddVertex(p0, normal, tangent, uv0, new Color(layer, ao0 / 3f, 0f, 0f));
-        surf.AddVertex(p1, normal, tangent, uv1, new Color(layer, ao1 / 3f, 0f, 0f));
-        surf.AddVertex(p2, normal, tangent, uv2, new Color(layer, ao2 / 3f, 0f, 0f));
-        surf.AddVertex(p3, normal, tangent, uv3, new Color(layer, ao3 / 3f, 0f, 0f));
+        surf.AddVertex(p0, normal, tangent, uv0, new Color(layer, ao0 / 3f, cB, cA));
+        surf.AddVertex(p1, normal, tangent, uv1, new Color(layer, ao1 / 3f, cB, cA));
+        surf.AddVertex(p2, normal, tangent, uv2, new Color(layer, ao2 / 3f, cB, cA));
+        surf.AddVertex(p3, normal, tangent, uv3, new Color(layer, ao3 / 3f, cB, cA));
         foreach (int t in VoxelGeometry.TriOrder)
             surf.Indices.Add(baseIdx + t);
 

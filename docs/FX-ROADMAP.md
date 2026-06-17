@@ -610,7 +610,31 @@ ground has an unguarded east edge (x>40) you can walk off — fence it later.
   fires are placed via `AddFire` (showcase/lessons) + auto on the existing `altar_fire` block.
 - **World scan to auto-light pre-placed emissive blocks** — `BlockChanged` only fires for armed
   PlayerEdits, so lesson-authored altar fires need an explicit `AddFire` (or a future startup scan).
-- Remaining Phase-1 **Water / Ambient / Sky-tie-in** batches are still ahead.
+
+**Status — Water batch 1 (2026-06-17): DONE (B1, B2, B9, B13).** Implemented + build-green + verified
+live in the showcase (new **Rivers & Waterfall** station; falling curtain reads correctly, no shader
+errors). The approach piggy-backs on the existing mesh + flood-fill rather than adding a sim:
+- **`ChunkMesher.cs`** bakes two per-cell water-FX values into the free `Custom0.b/.a` float channels:
+  a **flow vector** on top faces (**B1** — derived from the static block field: water spills toward open
+  air, harder toward a drop) and a **falling-sheet flag** on vertical faces with water above (**B2**).
+  Water-face greedy merging is *gated on these matching*, so a still pond stays one big quad (zero
+  regression) while a river/curtain splits into the per-cell quads it needs.
+- **`assets/shaders/water.gdshader`** reads those channels: **B1** scrolls stylised (quantised) foam
+  crests along the current; **B2** pours quantised vertical foam streaks down a curtain, more opaque.
+- **`assets/shaders/ripple.gdshader`** + **`Fx.Ring()`** (a pooled flat decal driven by a `prog`
+  uniform) — **B13** expanding ripple rings, fired on player water-entry and projectile splash.
+- **B9** splash-on-entry: extended the player's existing splash with a ring, and added splash+ring when
+  a thrown projectile plops into water (`Projectile` now takes a `VoxelWorld` to detect liquid, since
+  water has no collider). Showcase waterfall has a hand-placed base **mist** (a persistent `GpuParticles3D`).
+- **Showcase:** new **Rivers & Waterfall** station — a walled cliff source pours a curtain into a catch pool.
+
+**Deferred within the water batch (deliberately):**
+- **Generalised waterfall base spray** — the showcase mist is hand-placed; a generic "spray where a
+  falling column lands" needs a controller (the 1-cell mesh snapshot can't see where a tall fall lands
+  across chunk borders). Good follow-up, mirrors `FireController`.
+- **B3 shoreline foam · B4 premium surface · B5 caustics · B6 wet waterline · B7 cave drips · B8 lava**
+  — the rest of the Water catalog; a second water pass.
+- Remaining Phase-1 **Ambient life** and **Sky-tie-in** batches are still ahead.
 
 ### Phase 2 — Weather drama + combat juice
 - **Weather:** C1 rain splashes+ripples · C2 valley mist · C3 lightning+thunder · C4 rainbow · C5 sandstorm · C9 snow accumulation · C10 wind debris · **C13 volumetric atmosphere (FogVolume — campfire smoke volumes, valley mist, darkness pockets; upgrades C2)**

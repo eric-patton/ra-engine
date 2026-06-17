@@ -204,6 +204,39 @@ public static class WorldGen
         w.SetBlock(31, 2, 106, stoneBrick, false);
         w.SetBlock(31, 3, 106, altarFire, false);              // altar coals (emissive block)
 
+        // Water FX station (Phase 1): a cliff source pours a falling curtain (B2) into a
+        // catch pool; the lip shows directional flow foam (B1); jumping in throws a splash
+        // and a ripple ring (B9 / B13). Built from static water — the mesher derives the
+        // flow/fall look from the geometry (no simulation needed for a fixed feature).
+        // Cliff body (x5..11, z96..99) with a walled top rim so the source pool stays calm
+        // and only the south lip (z99) spills over.
+        for (int x = 5; x <= 11; x++)
+            for (int z = 96; z <= 99; z++)
+                for (int y = 1; y <= 6; y++)
+                    w.SetBlock(x, y, z, stone, false);
+        for (int x = 5; x <= 11; x++)
+            w.SetBlock(x, 7, 96, stone, false);                 // back rim
+        for (int z = 97; z <= 99; z++)
+        {
+            w.SetBlock(5, 7, z, stone, false);                  // side rims (incl. curtain-top sides)
+            w.SetBlock(11, 7, z, stone, false);
+        }
+        for (int x = 6; x <= 10; x++)                           // calm source pool, open only south
+            for (int z = 97; z <= 98; z++)
+                w.SetBlock(x, 7, z, water, false);
+        for (int x = 6; x <= 10; x++)                           // falling curtain down the south face
+            for (int y = 1; y <= 7; y++)
+                w.SetBlock(x, y, 99, water, false);
+        for (int x = 4; x <= 12; x++)                           // catch pool: stone floor + sand rim
+            for (int z = 100; z <= 104; z++)
+            {
+                w.SetBlock(x, -1, z, stone, false);
+                w.SetBlock(x, 0, z, sand, false);
+            }
+        for (int x = 5; x <= 11; x++)                           // pooled water (1 deep over the floor)
+            for (int z = 100; z <= 103; z++)
+                w.SetBlock(x, 0, z, water, false);
+
         // A few trees in the open field (ambience; future falling leaves).
         Tree(w, new Vector3I(8, 1, 42));
         Tree(w, new Vector3I(30, 1, 46));

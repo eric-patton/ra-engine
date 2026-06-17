@@ -373,6 +373,9 @@ public partial class Game : Node3D
         fire.AddFire(new Vector3(31.5f, 3f, 102.5f), Core.FireKind.Brazier);
         fire.AddFire(new Vector3(31.5f, 4f, 106.5f), Core.FireKind.Altar);
 
+        // Phase 1 — a persistent mist where the waterfall curtain meets the catch pool.
+        world.AddChild(MakeWaterfallSpray(new Vector3(8f, 0.9f, 100.2f)));
+
         // Label each station with a readable wooden sign (walk up and press E to read).
         void Sign(float x, float y, float z, string title, string body) =>
             world.AddChild(RAEngine.World.Signpost.Create(new Vector3(x, y, z), body, title));
@@ -406,6 +409,14 @@ public partial class Game : Node3D
         Sign(17, 1, 79, "Landing Dust",
             "Climb the four steps onto the platform, then jump off the north edge — "
             + "you land in a puff of dust scaled to how far you fell.");
+        Sign(13, 1, 103, "Rivers & Waterfall",
+            """
+            Water that moves. The source pool spills over the lip and pours down a
+            falling curtain into the catch pool below, throwing up a fine mist.
+
+            Watch the lip: the surface streams in the direction it flows (foam crests
+            ride the current). Jump into the catch pool for a splash and a ripple ring.
+            """);
         Sign(6, 1, 66, "Water", "Jump into the pool for a splash and a ripple.");
         Sign(33, 1, 61, "Bloom / Glow",
             "These lamps emit light that blooms. Press [F7] to cycle the glow mood — Divine makes "
@@ -423,6 +434,46 @@ public partial class Game : Node3D
         });
 
         _session.Hud.ShowBanner("FX Showcase — walk to each sign and press E to read.   [F5] weather  [F6] time  [F7] glow", 8f);
+    }
+
+    /// <summary>A persistent fine mist for the showcase waterfall's base — soft white
+    /// billboards drifting up and fading, where the falling curtain meets the catch pool.</summary>
+    private static GpuParticles3D MakeWaterfallSpray(Vector3 pos)
+    {
+        var grad = new Gradient();
+        grad.SetColor(0, new Color(0.92f, 0.96f, 1f, 0.5f));
+        grad.SetColor(1, new Color(0.92f, 0.96f, 1f, 0f)); // fade out over life
+        var quad = new QuadMesh { Size = new Vector2(0.5f, 0.5f) };
+        quad.SurfaceSetMaterial(0, new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            VertexColorUseAsAlbedo = true,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+            BillboardKeepScale = true,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        });
+        return new GpuParticles3D
+        {
+            Name = "WaterfallSpray",
+            Position = pos,
+            Amount = 26,
+            Lifetime = 1.2,
+            DrawPass1 = quad,
+            ProcessMaterial = new ParticleProcessMaterial
+            {
+                EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+                EmissionBoxExtents = new Vector3(2.4f, 0.1f, 0.4f),
+                Direction = Vector3.Up,
+                Spread = 36f,
+                InitialVelocityMin = 1.1f,
+                InitialVelocityMax = 2.7f,
+                Gravity = new Vector3(0, -3.2f, 0),
+                ScaleMin = 0.6f,
+                ScaleMax = 1.5f,
+                ColorRamp = new GradientTexture1D { Gradient = grad },
+            },
+        };
     }
 
     /// <summary>A simple gallery of one pillar of every block type (the texture library),
