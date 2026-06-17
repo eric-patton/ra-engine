@@ -9,26 +9,29 @@ namespace RAEngine.World;
 /// small, translucent, hard-stepped voxel cubes so it reads with real 3D depth (layered cubes you
 /// can see through), and makes the pools visibly churn near each drop. The look is GEOMETRY, not a
 /// shader trick on a flat face: each turbulent macro-cell is subdivided into a sub-grid of cubes
-/// rendered through ONE <see cref="MultiMeshInstance3D"/>; the shader (churn.gdshader) does all the
-/// per-frame work (collapse sub-cubes below a turbulence-scaled density threshold, jitter + scroll
-/// the survivors, hard-stepped blue→white palette at translucent alpha).
+/// rendered through ONE <see cref="MultiMeshInstance3D"/>.
 ///
-/// The field is BAKED once over the static showcase water — no per-frame fluid sim and no per-frame
-/// buffer upload. We classify each water cell as a falling CURTAIN (a vertical sheet → tall streak
-/// cubes) or surface FOAM (turbulence radiating out from where a fall lands → chunky foam cubes),
-/// then emit the sub-cubes. In this blocky world the cascade is a solid water staircase, so "air
-/// directly below" finds nothing; the real signal for falling water is an exposed vertical face
-/// with water above it (the same signal the mesher uses to flag a curtain).
+/// The field is BAKED once over the static showcase water — no per-frame fluid sim, no per-frame
+/// buffer upload. We classify each water cell as a falling CURTAIN (a vertical sheet) or surface
+/// FOAM (turbulence radiating out from where a fall lands, via BFS), then emit sub-cubes. In this
+/// blocky world the cascade is a solid water staircase, so "air directly below" finds nothing; the
+/// real signal for falling water is an exposed vertical face with water above it.
+///
+/// Two things are baked STATICALLY per cube so the body never flickers: an off-lattice jitter, a
+/// size, and whether the cube exists at all (~30-40% dropout). That breaks the rigid grid in space.
+/// All MOTION is in the shader and DIRECTIONAL — each cube carries a flow angle so it streams down
+/// the falls (along the spill) or radially out from the impact, fading as it goes (churn.gdshader).
 /// </summary>
 public static class ChurnWater
 {
     private const int Sub = 3;            // sub-cubes per axis across a 1 m macro-cell
     private const float Step = 1f / Sub;
+    private const float Jitter = 0.36f;   // static off-lattice spread, in cell fractions
 
-    // Drives the palette bias (edge/impact read whiter); packed into per-instance custom data.
+    // Drives the palette bias / flow mode; packed into per-instance custom data (g channel).
     private enum State { Falling = 0, Edge = 1, Impact = 2, Spread = 3 }
 
-    private struct Inst { public Vector3 Pos; public Vector3 Scale; public float Turb; public State S; public uint Key; }
+    private struct Inst { public Vector3 Pos; public Vector3 Scale; public Color Data; }
 
     public static Node3D Build(VoxelWorld world)
     {
@@ -74,8 +77,9 @@ public static class ChurnWater
                 surface.Add(p);
 
         // 2b. Seed the surface-foam turbulence: 10 where a fall lands (IMPACT), 6 at the brink beside
-        // a curtain (EDGE).
+        // a curtain (EDGE). Remember impact XZ so foam can flow radially away from it.
         var turb = new Dictionary<Vector3I, float>();
+        var impacts = new HashSet<Vector2I>();
         void Seed(Vector3I p, float t)
         {
             if (!surface.Contains(p)) return;
@@ -90,7 +94,7 @@ public static class ChurnWater
             int sx = Mathf.Sign(outDir.X), sz = Mathf.Sign(outDir.Z);
             for (int y = p.Y; y >= p.Y - 24; y--)                 // impact: pool the curtain pours into
                 if (IsWater(p.X + sx, y, p.Z + sz) && !IsWater(p.X + sx, y + 1, p.Z + sz))
-                { Seed(new Vector3I(p.X + sx, y, p.Z + sz), 10f); break; }
+                { Seed(new Vector3I(p.X + sx, y, p.Z + sz), 10f); impacts.Add(new Vector2I(p.X + sx, p.Z + sz)); break; }
         }
 
         // 2c. Spread turbulence outward over the pool surface (BFS, decaying ~2 per block).
@@ -113,37 +117,33 @@ public static class ChurnWater
         // 3. Emit sub-cubes.
         var insts = new List<Inst>();
 
-        // Curtains → tall vertical streak cubes (SUB×SUB per cell), nudged out past the water face so
-        // they stand proud of the flat backing.
+        // Curtains → tall vertical streak cubes that stream down + along the spill. Nudged out past
+        // the water face so they stand proud of the flat backing.
         foreach (var (p, outDir) in curtains)
         {
             var outN = new Vector3(Mathf.Sign(outDir.X), 0, Mathf.Sign(outDir.Z));
-            if (outN.Length() > 1.01f) outN = outN.Normalized();
+            outN = outN.Length() > 0.001f ? outN.Normalized() : new Vector3(0, 0, 1);
+            float ang = Angle01(outN.X, outN.Z);
             for (int i = 0; i < Sub; i++)
             for (int k = 0; k < Sub; k++)
-                insts.Add(new Inst
-                {
-                    Pos = new Vector3(p.X + (i + 0.5f) * Step, p.Y + 0.5f, p.Z + (k + 0.5f) * Step) + outN * 0.25f,
-                    Scale = new Vector3(Step * 0.8f, 0.92f, Step * 0.8f),   // tall streak
-                    Turb = 0.9f, S = State.Falling, Key = KeyOf(p, i * Sub + k),
-                });
+                Emit(insts, new Vector3(p.X + (i + 0.5f) * Step, p.Y + 0.5f, p.Z + (k + 0.5f) * Step) + outN * 0.25f,
+                    new Vector3(Step * 0.8f, 0.92f, Step * 0.8f), 0.9f, State.Falling, ang, p, i * Sub + k);
         }
 
-        // Foam → cubes riding the pool surface; one layer normally, two at hard impact.
+        // Foam → cubes riding the pool surface that drift radially out from the nearest impact and
+        // fade; one layer normally, two at hard impact.
         foreach (var (c, t) in turb)
         {
             if (t <= 0f) continue;
             State s = t >= 8f ? State.Impact : t >= 4f ? State.Edge : State.Spread;
             int layers = t >= 8f ? 2 : 1;
+            float ang = FlowAwayFromImpact(c, impacts);
             for (int L = 0; L < layers; L++)
             for (int i = 0; i < Sub; i++)
             for (int k = 0; k < Sub; k++)
-                insts.Add(new Inst
-                {
-                    Pos = new Vector3(c.X + (i + 0.5f) * Step, c.Y + 1f + L * Step, c.Z + (k + 0.5f) * Step),
-                    Scale = new Vector3(Step * 0.95f, Step * 0.95f, Step * 0.95f),
-                    Turb = Mathf.Clamp(t / 10f, 0.15f, 1f), S = s, Key = KeyOf(c, L * 99 + i * Sub + k),
-                });
+                Emit(insts, new Vector3(c.X + (i + 0.5f) * Step, c.Y + 1f + L * Step, c.Z + (k + 0.5f) * Step),
+                    new Vector3(Step * 0.95f, Step * 0.95f, Step * 0.95f),
+                    Mathf.Clamp(t / 10f, 0.15f, 1f), s, ang, c, L * 99 + i * Sub + k);
         }
 
         if (insts.Count == 0) return root;
@@ -158,11 +158,8 @@ public static class ChurnWater
         };
         for (int i = 0; i < insts.Count; i++)
         {
-            var it = insts[i];
-            mm.SetInstanceTransform(i, new Transform3D(Basis.Identity.Scaled(it.Scale), it.Pos));
-            float seed = (it.Key & 0xFFFF) / 65535f;
-            float phase = ((it.Key >> 16) & 0xFFFF) / 65535f * 6.2832f;
-            mm.SetInstanceCustomData(i, new Color(it.Turb, (float)(int)it.S / 4f, seed, phase));
+            mm.SetInstanceTransform(i, new Transform3D(Basis.Identity.Scaled(insts[i].Scale), insts[i].Pos));
+            mm.SetInstanceCustomData(i, insts[i].Data);
         }
 
         var mat = new ShaderMaterial
@@ -174,7 +171,50 @@ public static class ChurnWater
         return root;
     }
 
-    // FNV-1a over the cell + sub-index, mixed so both the low (seed) and high (phase) 16 bits vary.
+    // Bake one sub-cube with a static off-lattice jitter, a static size, and ~30-40% dropout, so the
+    // grid is broken in SPACE and never flickers. flowAngle01 + state drive the shader's motion.
+    private static void Emit(List<Inst> list, Vector3 basePos, Vector3 baseScale, float turb, State s,
+        float flowAngle01, Vector3I cell, int sub)
+    {
+        uint h = KeyOf(cell, sub);
+        float drop = s == State.Falling ? 0.40f : 0.30f;
+        if ((h & 0xFF) / 255f < drop) return;
+
+        uint h2 = KeyOf(cell, sub * 31 + 7);
+        float jx = (h >> 8 & 0xFF) / 255f - 0.5f;
+        float jz = (h >> 16 & 0xFF) / 255f - 0.5f;
+        float jy = (h >> 24 & 0xFF) / 255f - 0.5f;
+        float sizef = 0.65f + (h2 >> 16 & 0xFF) / 255f * 0.7f;     // 0.65 .. 1.35 (range of sizes)
+        float seed = (h2 & 0xFFFF) / 65535f;
+
+        list.Add(new Inst
+        {
+            Pos = basePos + new Vector3(jx, jy * 0.6f, jz) * Jitter,
+            Scale = baseScale * sizef,
+            Data = new Color(turb, (float)(int)s / 4f, seed, flowAngle01),
+        });
+    }
+
+    private static float FlowAwayFromImpact(Vector3I cell, HashSet<Vector2I> impacts)
+    {
+        float bestD = float.MaxValue; Vector2I best = default; bool found = false;
+        foreach (var im in impacts)
+        {
+            float d = (im.X - cell.X) * (im.X - cell.X) + (im.Y - cell.Z) * (im.Y - cell.Z);
+            if (d < bestD) { bestD = d; best = im; found = true; }
+        }
+        if (!found || bestD < 0.01f)                              // on/at the impact: pick a stable dir
+            return (KeyOf(cell, 5) & 0xFFFF) / 65535f;
+        return Angle01(cell.X - best.X, cell.Z - best.Y);
+    }
+
+    private static float Angle01(float x, float z)
+    {
+        float a = Mathf.Atan2(z, x) / (Mathf.Pi * 2f) + 0.5f;
+        return a - Mathf.Floor(a);                               // wrap to [0,1)
+    }
+
+    // FNV-1a over the cell + sub-index.
     private static uint KeyOf(Vector3I p, int sub)
     {
         uint h = 2166136261u;
