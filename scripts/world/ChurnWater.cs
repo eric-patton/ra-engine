@@ -17,18 +17,17 @@ namespace RAEngine.World;
 /// blocky world the cascade is a solid water staircase, so "air directly below" finds nothing; the
 /// real signal for falling water is an exposed vertical face with water above it.
 ///
-/// Two things are baked STATICALLY per cube so the body never flickers: an off-lattice jitter, a
-/// size, and whether the cube exists at all (~30-40% dropout). That breaks the rigid grid in space.
-/// All MOTION is in the shader and DIRECTIONAL — each cube carries a flow angle so it streams down
-/// the falls (along the spill) or radially out from the impact, fading as it goes (churn.gdshader).
+/// Per cube we bake a static off-lattice jitter, a random size, and ~30-40% dropout so the body is
+/// broken up in space and never flickers. All MOTION is in the shader and DIRECTIONAL: falls stream
+/// straight DOWN; foam streams DOWNSTREAM + sideways (never upstream) and only over interior water,
+/// so it can't flow backward over the brink or bleed onto the surrounding ground (churn.gdshader).
 /// </summary>
 public static class ChurnWater
 {
-    private const int Sub = 3;            // sub-cubes per axis across a 1 m macro-cell
+    private const int Sub = 4;            // sub-cubes per axis across a 1 m macro-cell (finer = smaller cubes)
     private const float Step = 1f / Sub;
-    private const float Jitter = 0.36f;   // static off-lattice spread, in cell fractions
+    private const float Jitter = 0.30f;   // static off-lattice spread, in cell fractions
 
-    // Drives the palette bias / flow mode; packed into per-instance custom data (g channel).
     private enum State { Falling = 0, Edge = 1, Impact = 2, Spread = 3 }
 
     private struct Inst { public Vector3 Pos; public Vector3 Scale; public Color Data; }
@@ -55,13 +54,12 @@ public static class ChurnWater
         bool IsAir(int x, int y, int z) => world.GetBlockId(x, y, z) == 0;
         (int dx, int dz)[] horiz = { (1, 0), (-1, 0), (0, 1), (0, -1) };
 
-        // 2a. CURTAINS — water with water directly above AND an exposed (air) vertical side: part of
-        // a falling sheet. outDir points outward across the exposed face(s) — the spill direction.
+        // 2a. CURTAINS — water with water directly above AND an exposed (air) vertical side.
         var curtains = new List<(Vector3I p, Vector3I outDir)>();
         var curtainSet = new HashSet<Vector3I>();
         foreach (var p in water)
         {
-            if (!IsWater(p.X, p.Y + 1, p.Z)) continue;            // needs water above
+            if (!IsWater(p.X, p.Y + 1, p.Z)) continue;
             Vector3I outDir = Vector3I.Zero;
             foreach (var (dx, dz) in horiz)
                 if (IsAir(p.X + dx, p.Y, p.Z + dz)) outDir += new Vector3I(dx, 0, dz);
@@ -70,14 +68,22 @@ public static class ChurnWater
             curtainSet.Add(p);
         }
 
+        // Dominant spill (downstream) direction — the average of all curtain exits. Foam is steered
+        // toward this and never allowed upstream, so the top can't flow backward over the brink.
+        Vector3 spill = Vector3.Zero;
+        foreach (var (_, outDir) in curtains)
+            spill += new Vector3(Mathf.Sign(outDir.X), 0, Mathf.Sign(outDir.Z));
+        spill = spill.Length() > 0.001f ? spill.Normalized() : new Vector3(0, 0, 1);
+        float spillAng = Angle01(spill.X, spill.Z);
+
         // Surface cells = water with air (non-water) above — foam rides here.
         var surface = new HashSet<Vector3I>();
         foreach (var p in water)
             if (!IsWater(p.X, p.Y + 1, p.Z) && !curtainSet.Contains(p))
                 surface.Add(p);
 
-        // 2b. Seed the surface-foam turbulence: 10 where a fall lands (IMPACT), 6 at the brink beside
-        // a curtain (EDGE). Remember impact XZ so foam can flow radially away from it.
+        // 2b. Seed surface-foam turbulence: 10 where a fall lands (IMPACT), 6 at the brink. Remember
+        // impact XZ so foam can radiate from it.
         var turb = new Dictionary<Vector3I, float>();
         var impacts = new HashSet<Vector2I>();
         void Seed(Vector3I p, float t)
@@ -87,17 +93,17 @@ public static class ChurnWater
         }
         foreach (var (p, outDir) in curtains)
         {
-            foreach (var (dx, dz) in horiz)                       // brink: surface touching the curtain
+            foreach (var (dx, dz) in horiz)
                 for (int dy = -1; dy <= 1; dy++)
                     Seed(new Vector3I(p.X + dx, p.Y + dy, p.Z + dz), 6f);
 
             int sx = Mathf.Sign(outDir.X), sz = Mathf.Sign(outDir.Z);
-            for (int y = p.Y; y >= p.Y - 24; y--)                 // impact: pool the curtain pours into
+            for (int y = p.Y; y >= p.Y - 24; y--)
                 if (IsWater(p.X + sx, y, p.Z + sz) && !IsWater(p.X + sx, y + 1, p.Z + sz))
                 { Seed(new Vector3I(p.X + sx, y, p.Z + sz), 10f); impacts.Add(new Vector2I(p.X + sx, p.Z + sz)); break; }
         }
 
-        // 2c. Spread turbulence outward over the pool surface (BFS, decaying ~2 per block).
+        // 2c. Spread turbulence over the pool surface (BFS, decaying ~2 per block).
         var queue = new Queue<Vector3I>(turb.Keys);
         while (queue.Count > 0)
         {
@@ -114,36 +120,69 @@ public static class ChurnWater
                 }
         }
 
+        // Helpers for foam emission.
+        bool Interior(Vector3I c)                                // all 4 horizontal neighbours are water
+        {
+            foreach (var (dx, dz) in horiz)
+                if (!water.Contains(new Vector3I(c.X + dx, c.Y, c.Z + dz))) return false;
+            return true;
+        }
+        bool NearCurtain(Vector3I c)                             // a lip cell, right beside the drop
+        {
+            foreach (var (dx, dz) in horiz)
+                for (int dy = -1; dy <= 1; dy++)
+                    if (curtainSet.Contains(new Vector3I(c.X + dx, c.Y + dy, c.Z + dz))) return true;
+            return false;
+        }
+        float FoamFlowAngle(Vector3I cell)
+        {
+            float bestD = float.MaxValue; Vector2I best = default; bool found = false;
+            foreach (var im in impacts)
+            {
+                float d = (im.X - cell.X) * (im.X - cell.X) + (im.Y - cell.Z) * (im.Y - cell.Z);
+                if (d < bestD) { bestD = d; best = im; found = true; }
+            }
+            if (!found || bestD < 0.01f) return spillAng;
+            var away = new Vector2(cell.X - best.X, cell.Z - best.Y);
+            if (away.Length() < 0.01f) return spillAng;
+            away = away.Normalized();
+            var sp = new Vector2(spill.X, spill.Z);
+            float along = away.Dot(sp);
+            Vector2 res = (away - sp * along) + sp * Mathf.Max(along, 0f);   // strip the upstream part
+            return res.Length() < 0.05f ? spillAng : Angle01(res.X, res.Y);
+        }
+
         // 3. Emit sub-cubes.
         var insts = new List<Inst>();
 
-        // Curtains → tall vertical streak cubes that stream down + along the spill. Nudged out past
-        // the water face so they stand proud of the flat backing.
+        // Curtains → tall, slim streak cubes that stream straight down. Nudged out past the water
+        // face so they stand proud of the flat backing.
         foreach (var (p, outDir) in curtains)
         {
             var outN = new Vector3(Mathf.Sign(outDir.X), 0, Mathf.Sign(outDir.Z));
             outN = outN.Length() > 0.001f ? outN.Normalized() : new Vector3(0, 0, 1);
-            float ang = Angle01(outN.X, outN.Z);
             for (int i = 0; i < Sub; i++)
             for (int k = 0; k < Sub; k++)
-                Emit(insts, new Vector3(p.X + (i + 0.5f) * Step, p.Y + 0.5f, p.Z + (k + 0.5f) * Step) + outN * 0.25f,
-                    new Vector3(Step * 0.8f, 0.92f, Step * 0.8f), 0.9f, State.Falling, ang, p, i * Sub + k);
+                Emit(insts, new Vector3(p.X + (i + 0.5f) * Step, p.Y + 0.5f, p.Z + (k + 0.5f) * Step) + outN * 0.18f,
+                    new Vector3(Step * 0.85f, Step * 2.0f, Step * 0.85f), 0.9f, State.Falling, 0f, p, i * Sub + k);
         }
 
-        // Foam → cubes riding the pool surface that drift radially out from the nearest impact and
-        // fade; one layer normally, two at hard impact.
+        // Foam → small cubes riding the pool surface that drift downstream/outward and fade. Only on
+        // interior water or right at a lip, so they never bleed onto the surrounding ground.
         foreach (var (c, t) in turb)
         {
             if (t <= 0f) continue;
+            bool lip = NearCurtain(c);
+            if (!lip && !Interior(c)) continue;
             State s = t >= 8f ? State.Impact : t >= 4f ? State.Edge : State.Spread;
             int layers = t >= 8f ? 2 : 1;
-            float ang = FlowAwayFromImpact(c, impacts);
+            float ang = FoamFlowAngle(c);
             for (int L = 0; L < layers; L++)
             for (int i = 0; i < Sub; i++)
             for (int k = 0; k < Sub; k++)
                 Emit(insts, new Vector3(c.X + (i + 0.5f) * Step, c.Y + 1f + L * Step, c.Z + (k + 0.5f) * Step),
-                    new Vector3(Step * 0.95f, Step * 0.95f, Step * 0.95f),
-                    Mathf.Clamp(t / 10f, 0.15f, 1f), s, ang, c, L * 99 + i * Sub + k);
+                    new Vector3(Step * 0.9f, Step * 0.9f, Step * 0.9f),
+                    Mathf.Clamp(t / 10f, 0.15f, 1f), s, ang, c, L * 137 + i * Sub + k);
         }
 
         if (insts.Count == 0) return root;
@@ -165,7 +204,7 @@ public static class ChurnWater
         var mat = new ShaderMaterial
         {
             Shader = GD.Load<Shader>("res://assets/shaders/churn.gdshader"),
-            RenderPriority = 1,                  // in front of the translucent water backing (-1)
+            RenderPriority = 1,
         };
         root.AddChild(new MultiMeshInstance3D { Name = "Churn", Multimesh = mm, MaterialOverride = mat });
         return root;
@@ -184,7 +223,7 @@ public static class ChurnWater
         float jx = (h >> 8 & 0xFF) / 255f - 0.5f;
         float jz = (h >> 16 & 0xFF) / 255f - 0.5f;
         float jy = (h >> 24 & 0xFF) / 255f - 0.5f;
-        float sizef = 0.65f + (h2 >> 16 & 0xFF) / 255f * 0.7f;     // 0.65 .. 1.35 (range of sizes)
+        float sizef = 0.55f + (h2 >> 16 & 0xFF) / 255f * 0.55f;    // 0.55 .. 1.10 (smaller, tighter range)
         float seed = (h2 & 0xFFFF) / 65535f;
 
         list.Add(new Inst
@@ -195,26 +234,12 @@ public static class ChurnWater
         });
     }
 
-    private static float FlowAwayFromImpact(Vector3I cell, HashSet<Vector2I> impacts)
-    {
-        float bestD = float.MaxValue; Vector2I best = default; bool found = false;
-        foreach (var im in impacts)
-        {
-            float d = (im.X - cell.X) * (im.X - cell.X) + (im.Y - cell.Z) * (im.Y - cell.Z);
-            if (d < bestD) { bestD = d; best = im; found = true; }
-        }
-        if (!found || bestD < 0.01f)                              // on/at the impact: pick a stable dir
-            return (KeyOf(cell, 5) & 0xFFFF) / 65535f;
-        return Angle01(cell.X - best.X, cell.Z - best.Y);
-    }
-
     private static float Angle01(float x, float z)
     {
         float a = Mathf.Atan2(z, x) / (Mathf.Pi * 2f) + 0.5f;
-        return a - Mathf.Floor(a);                               // wrap to [0,1)
+        return a - Mathf.Floor(a);
     }
 
-    // FNV-1a over the cell + sub-index.
     private static uint KeyOf(Vector3I p, int sub)
     {
         uint h = 2166136261u;

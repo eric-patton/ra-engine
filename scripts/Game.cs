@@ -373,22 +373,11 @@ public partial class Game : Node3D
         fire.AddFire(new Vector3(31.5f, 3f, 102.5f), Core.FireKind.Brazier);
         fire.AddFire(new Vector3(31.5f, 4f, 106.5f), Core.FireKind.Altar);
 
-        // Phase 1 — particle dressing for each drop of the tiered cascade (positions match the
-        // tiers in WorldGen.WaterfallCascade): lip churn, a falling sheet, splash + foam at each
-        // ledge, widening toward the base.
-        world.AddChild(RAEngine.World.WaterfallFx.Build(
-            lipCenter: new Vector3(8f, 12.2f, 95.2f), baseCenter: new Vector3(8f, 8.4f, 95.8f),
-            width: 5f, fallHeight: 4f, spillDir: Vector3.Back));
-        world.AddChild(RAEngine.World.WaterfallFx.Build(
-            lipCenter: new Vector3(8f, 8.2f, 98.2f), baseCenter: new Vector3(8f, 4.4f, 98.8f),
-            width: 7f, fallHeight: 4f, spillDir: Vector3.Back));
-        world.AddChild(RAEngine.World.WaterfallFx.Build(
-            lipCenter: new Vector3(8f, 4.2f, 101.2f), baseCenter: new Vector3(8f, 0.8f, 102.2f),
-            width: 9f, fallHeight: 4f, spillDir: Vector3.Back));
-
         // Phase 1 — volumetric churn: real 3D sub-voxel cubes over the falls and pools so the
         // cascade reads as layered, translucent blocky whitewater (not a flat scrolling face) and
         // the pools visibly churn near each drop. Classified once over the static showcase water.
+        // This replaces the old GpuParticles "WaterfallFx" spray rigs (they shot cubes up into the
+        // air and clashed with the churn); a sparse spray accent can return later per the FX plan.
         world.AddChild(RAEngine.World.ChurnWater.Build(world));
 
         // Label each station with a readable wooden sign (walk up and press E to read).

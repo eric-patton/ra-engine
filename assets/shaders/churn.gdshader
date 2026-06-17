@@ -12,11 +12,11 @@
 shader_type spatial;
 render_mode blend_mix, cull_disabled, depth_prepass_alpha, diffuse_burley, specular_schlick_ggx;
 
-uniform float fall_rate = 0.55;     // downward life-cycles / sec for falling cubes
-uniform float fall_travel = 3.4;    // metres a falling cube streams before it recycles
-uniform float fall_lateral = 0.35;  // how much falling cubes drift along the spill direction
-uniform float pool_rate = 0.32;     // outward life-cycles / sec for pool foam
-uniform float pool_travel = 2.6;    // metres foam drifts out from the impact before it fades
+uniform float fall_rate = 0.6;      // downward life-cycles / sec for falling cubes
+uniform float fall_travel = 3.0;    // metres a falling cube streams before it recycles
+uniform float fall_lateral = 0.0;   // falls pour straight DOWN — no outward spread
+uniform float pool_rate = 0.3;      // outward life-cycles / sec for pool foam
+uniform float pool_travel = 1.1;    // short outward drift so foam stays on the pool, not the grass
 uniform vec3 deep_color  : source_color = vec3(0.10, 0.38, 0.74);
 uniform vec3 mid_color   : source_color = vec3(0.36, 0.66, 0.93);
 uniform vec3 light_color : source_color = vec3(0.74, 0.90, 1.00);
