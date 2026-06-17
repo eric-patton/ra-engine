@@ -651,7 +651,24 @@ top isn't static, and that lip row gets a foam band so the surface→fall transi
   across chunk borders). Good follow-up, mirrors `FireController`.
 - **B3 shoreline foam · B4 premium surface · B5 caustics · B6 wet waterline · B7 cave drips · B8 lava**
   — the rest of the Water catalog; a second water pass.
-- Remaining Phase-1 **Ambient life** and **Sky-tie-in** batches are still ahead.
+- Remaining Phase-1 **Sky-tie-in** batch (godrays/cloud-shadows/underwater caustics) is still ahead.
+
+**Status - Ambient life batch (2026-06-17): DONE (D-arch + D1/D2/D3/D4/D7/D8/D9, commit ab33034).** One
+self-contained `scripts/core/AmbientLifeDirector` (Node3D, owned by GameSession so every session gets one)
+reads biome+time+weather+wind around the player and drives every living-world effect with restraint:
+- **Particle fields** (the motes/fireflies GpuParticles pattern): leaves (D1) + blossom petals (D8) near
+  trees; light-catching pollen (D2) + wind-borne dandelion fluff (D7) in daytime meadows.
+- **Creatures** (billboard quads + 2-frame flap, the Fire `home + sin(t)` kernel): butterflies (D3); birds
+  (D4) crossing the sky + a scriptable `ReleaseDove(from,to)` for lesson beats (Noah/baptism); fish (D9)
+  darting under nearby water with the odd splashing jump (`Fx.Splash` + `World.AddRipple`).
+- Context = shared `TerrainGenerator.BiomeAt` in the streamed sandbox, else nearby world blocks
+  (leaves->trees, liquid+open-above->water) so it runs with no generator (showcase/lessons -> Plains). All
+  billboard textures generated procedurally (no PNGs). Creature counts recompute on the throttled 0.4s tick.
+- Showcase: new **Ambient Life** station (pond + grove) + **[L]** density hotkey (Off/Sparse/Normal/Lush);
+  `--test-ambientlife` windowed smoke test. Adversarially reviewed (3 agents) -> fixed dove-culling, count
+  thrash, fish-splash frame-drop, decorated-pond water scan, and Env/World teardown guards before commit.
+- Deferred within Ambient life: D5 cave ambience, D6 swamp spores, D10 ash, D11 critters, D12 flies, D13
+  tumbleweed (niche biome emitters); bees (no hives yet).
 
 ### Phase 2 — Weather drama + combat juice
 - **Weather:** C1 rain splashes+ripples · C2 valley mist · C3 lightning+thunder · C4 rainbow · C5 sandstorm · C9 snow accumulation · C10 wind debris · **C13 volumetric atmosphere (FogVolume — campfire smoke volumes, valley mist, darkness pockets; upgrades C2)**
