@@ -373,8 +373,11 @@ public partial class Game : Node3D
         fire.AddFire(new Vector3(31.5f, 3f, 102.5f), Core.FireKind.Brazier);
         fire.AddFire(new Vector3(31.5f, 4f, 106.5f), Core.FireKind.Altar);
 
-        // Phase 1 — a persistent mist where the waterfall curtain meets the catch pool.
-        world.AddChild(MakeWaterfallSpray(new Vector3(8f, 0.9f, 100.2f)));
+        // Phase 1 — particle dressing for the waterfall: lip churn, a falling sheet, base splash.
+        world.AddChild(RAEngine.World.WaterfallFx.Build(
+            lipCenter: new Vector3(8f, 8.7f, 100f),
+            baseCenter: new Vector3(8f, 1f, 100.6f),
+            width: 5f, fallHeight: 8f, spillDir: Vector3.Back));
 
         // Label each station with a readable wooden sign (walk up and press E to read).
         void Sign(float x, float y, float z, string title, string body) =>
@@ -440,58 +443,6 @@ public partial class Game : Node3D
         });
 
         _session.Hud.ShowBanner("FX Showcase — walk to each sign and press E to read.   [F5] weather  [F6] time  [F7] glow", 8f);
-    }
-
-    /// <summary>A persistent fine mist for the showcase waterfall's base — soft white
-    /// billboards drifting up and fading, where the falling curtain meets the catch pool.</summary>
-    private static GpuParticles3D MakeWaterfallSpray(Vector3 pos)
-    {
-        var grad = new Gradient();
-        grad.SetColor(0, new Color(0.92f, 0.96f, 1f, 0.45f));
-        grad.SetColor(1, new Color(0.92f, 0.96f, 1f, 0f)); // fade out over life
-        var quad = new QuadMesh { Size = new Vector2(0.5f, 0.5f) };
-        quad.SurfaceSetMaterial(0, new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            VertexColorUseAsAlbedo = true,
-            AlbedoTexture = Core.Fx.SoftDot(),                 // soft round mist, not hard squares
-            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
-            BillboardKeepScale = true,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            RenderPriority = 1,                                // draw after the water (priority -1)
-            ProximityFadeEnabled = true,                       // soft-particle fade at the water/rock seam
-            ProximityFadeDistance = 0.6f,
-        });
-        // Grow each puff over its life so it disperses like mist.
-        var scaleCurve = new Curve();
-        scaleCurve.AddPoint(new Vector2(0f, 0.5f));
-        scaleCurve.AddPoint(new Vector2(1f, 1.4f));
-        return new GpuParticles3D
-        {
-            Name = "WaterfallSpray",
-            Position = pos,
-            Amount = 30,
-            Lifetime = 1.3,
-            DrawPass1 = quad,
-            ProcessMaterial = new ParticleProcessMaterial
-            {
-                EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
-                EmissionBoxExtents = new Vector3(2.4f, 0.1f, 0.4f),
-                Direction = Vector3.Up,
-                Spread = 38f,
-                InitialVelocityMin = 1.0f,
-                InitialVelocityMax = 2.6f,
-                Gravity = new Vector3(0, -3.0f, 0),
-                ScaleMin = 0.7f,
-                ScaleMax = 1.6f,
-                ScaleCurve = new CurveTexture { Curve = scaleCurve },
-                TurbulenceEnabled = true,
-                TurbulenceNoiseStrength = 1.4f,
-                TurbulenceNoiseScale = 1.6f,
-                ColorRamp = new GradientTexture1D { Gradient = grad },
-            },
-        };
     }
 
     /// <summary>A simple gallery of one pillar of every block type (the texture library),
