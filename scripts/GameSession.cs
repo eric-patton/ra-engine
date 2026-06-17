@@ -30,6 +30,13 @@ public partial class GameSession : Node3D
     public PauseMenu Pause { get; private set; }
     public Mode CurrentMode { get; private set; }
     public bool InDialogue { get; private set; }
+
+    // Free-fly "photo mode" camera (P). A bodiless camera at a stable scene path
+    // (/root/Game/Session/FreeCam) so its transform can be driven precisely from code
+    // or the godot-ai bridge; while active the player is frozen and this is current.
+    public FreeCam FreeCam { get; private set; }
+    private bool _freeCamOn;
+    private Input.MouseModeEnum _preFreeCamMouse = Input.MouseModeEnum.Visible;
     public float InteractRange = 3.8f;
     public System.Action ReturnToMenuRequested;
     private bool _wasFocused = true;
@@ -85,6 +92,11 @@ public partial class GameSession : Node3D
         Player.GlobalPosition = spawn;
         Env.SetWeatherFollow(Player); // weather + ambient particles track the player (sandbox & lessons)
 
+        // Free-fly photo camera, parked dormant at a fixed path (the session has an
+        // identity transform, so its local position equals world position).
+        FreeCam = new FreeCam { Name = "FreeCam" };
+        AddChild(FreeCam);
+
         Hud = new GameHud { Name = "Hud" };
         AddChild(Hud);
 
@@ -119,7 +131,7 @@ public partial class GameSession : Node3D
         Dialogue.Finished += OnDialogueFinished;
 
         Pause = new PauseMenu { Name = "PauseMenu" };
-        Pause.CanPause = () => !InDialogue && !_crafting && !_teacherOpen && !_presentMode && !_reading;
+        Pause.CanPause = () => !InDialogue && !_crafting && !_teacherOpen && !_presentMode && !_reading && !_freeCamOn;
         Pause.OnReturnToMenu = () => ReturnToMenuRequested?.Invoke();
         AddChild(Pause);
 
@@ -276,6 +288,40 @@ public partial class GameSession : Node3D
         Hud.ShowBanner($"Saved {path}", 2f);
     }
 
+    // ---- free-fly photo camera (P) ---------------------------------------
+
+    private void ToggleFreeCam()
+    {
+        if (_freeCamOn) ExitFreeCam();
+        else EnterFreeCam();
+    }
+
+    /// <summary>Enter photo mode: freeze the player and hand control to the free camera,
+    /// seeded at the player's current eye so the view does not jump.</summary>
+    private void EnterFreeCam()
+    {
+        _freeCamOn = true;
+        FreeCam.GlobalTransform = Player.Camera.GlobalTransform;
+        FreeCam.Fov = 75f; // a neutral framing FOV (the player cam may be sprint-widened)
+        FreeCam.SetActive(true);
+        Player.InputEnabled = false;
+        _preFreeCamMouse = Input.MouseMode;
+        Input.MouseMode = Input.MouseModeEnum.Captured; // captured so hand mouse-look works
+        Hud.SetInteractPrompt("");
+        Hud.SetMouseHint("");
+        Hud.ShowBanner("Free camera — WASD fly · Space/Ctrl up/down · Shift boost · wheel speed · T precise steps · P to exit", 4f);
+    }
+
+    private void ExitFreeCam()
+    {
+        _freeCamOn = false;
+        FreeCam.SetActive(false);
+        Player.Camera.Current = true;
+        Player.InputEnabled = true;
+        Input.MouseMode = _preFreeCamMouse;
+        Hud.SetFreeCam("");
+    }
+
     /// <summary>Turn on the survival-style loop: blocks are gathered by breaking and
     /// spent by placing, the hotbar tracks stack counts, and a Tab crafting menu is
     /// available. <paramref name="startKit"/> seeds a few stacks so building is easy
@@ -370,6 +416,22 @@ public partial class GameSession : Node3D
                 $"FPS {Engine.GetFramesPerSecond()}   draws {draws}\n" +
                 $"chunks {World.ChunkCount}   meshing {World.MeshingCount}   dirty {World.DirtyCount}\n" +
                 $"pos  {pp.X:F0}, {pp.Y:F0}, {pp.Z:F0}");
+        }
+
+        // Free-fly photo camera (P): suspend all normal interaction while flying; keep
+        // the coordinate readout fresh so it shows in any screenshot. Toggle again to exit.
+        if (_freeCamOn)
+        {
+            Hud.SetFreeCam("FREE CAM — P to exit\n" + FreeCam.StatusLine());
+            if (Input.IsActionJustPressed(GameInput.Actions.FreeCam)) ExitFreeCam();
+            return;
+        }
+        if (Input.IsActionJustPressed(GameInput.Actions.FreeCam)
+            && !InDialogue && !_crafting && !_teacherOpen && !_presentMode && !_reading
+            && !(Pause?.IsPaused ?? false))
+        {
+            EnterFreeCam();
+            return;
         }
 
         // Present mode: HUD is hidden; F2 grabs a screenshot, Esc returns.

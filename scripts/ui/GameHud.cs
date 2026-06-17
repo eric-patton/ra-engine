@@ -35,6 +35,7 @@ public partial class GameHud : CanvasLayer
         BuildCompass();
         BuildClock();
         BuildDebug();
+        BuildFreeCam();
         BuildReader(); // sign-reading modal, above the HUD but under the fade
         BuildFade(); // last: a scene-transition curtain drawn over everything
     }
@@ -59,6 +60,39 @@ public partial class GameHud : CanvasLayer
 
     public void ToggleDebug() { if (_debug != null) _debug.Visible = !_debug.Visible; }
     public void SetDebug(string text) { if (_debug != null && _debug.Text != text) _debug.Text = text; }
+
+    // ---- free-fly camera readout ------------------------------------------
+
+    private Label _freeCam;
+
+    private void BuildFreeCam()
+    {
+        _freeCam = new Label { Name = "FreeCam", Visible = false };
+        _freeCam.AddThemeFontSizeOverride("font_size", 16);
+        _freeCam.AddThemeColorOverride("font_color", new Color(1f, 0.95f, 0.7f));
+        _freeCam.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _freeCam.AddThemeConstantOverride("outline_size", 4);
+        _freeCam.MouseFilter = Control.MouseFilterEnum.Ignore;
+        AddChild(_freeCam);
+        GetViewport().SizeChanged += RelayoutFreeCam;
+        RelayoutFreeCam();
+    }
+
+    private void RelayoutFreeCam()
+    {
+        Vector2 vp = GetViewport().GetVisibleRect().Size;
+        _freeCam.Size = new Vector2(460, 70);
+        _freeCam.Position = new Vector2(20, vp.Y - 96); // bottom-left, above the mouse hint
+    }
+
+    /// <summary>Show (or clear, with "") the photo-camera coordinate readout. Painted
+    /// each frame by the session so the numbers are visible in the screenshot itself.</summary>
+    public void SetFreeCam(string text)
+    {
+        if (_freeCam == null) return;
+        if (_freeCam.Text != text) _freeCam.Text = text;
+        _freeCam.Visible = !string.IsNullOrEmpty(text);
+    }
 
     // ---- clock ------------------------------------------------------------
 
@@ -696,6 +730,7 @@ public partial class GameHud : CanvasLayer
         vp.SizeChanged -= RelayoutBanner;
         vp.SizeChanged -= RelayoutMouseHint;
         vp.SizeChanged -= RelayoutClock;
+        vp.SizeChanged -= RelayoutFreeCam;
     }
 
     private void RelayoutBanner()

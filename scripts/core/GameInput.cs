@@ -51,6 +51,11 @@ public static class GameInput
         // Grab/release the mouse on demand (works in every capture mode).
         Key(Actions.ToggleCapture, Godot.Key.M);
 
+        // Free-fly "photo mode" camera (dev/teacher tool; P = photo). T toggles its
+        // precise discrete-step control (only meaningful while photo mode is active).
+        Key(Actions.FreeCam, Godot.Key.P);
+        Key(Actions.FreeCamStep, Godot.Key.T);
+
         for (int i = 0; i < 9; i++)
             Key($"hotbar_{i + 1}", (Key)((int)Godot.Key.Key1 + i));
 
@@ -118,6 +123,8 @@ public static class GameInput
         public const string KbBreak = "kb_break";
         public const string KbPlace = "kb_place";
         public const string ToggleCapture = "toggle_capture";
+        public const string FreeCam = "free_cam";
+        public const string FreeCamStep = "free_cam_step";
         public const string EditorSave = "editor_save";
         public const string EditorLoad = "editor_load";
         public const string MarkA = "editor_mark_a";
