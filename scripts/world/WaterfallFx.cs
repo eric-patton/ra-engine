@@ -23,25 +23,33 @@ public static class WaterfallFx
             amount: 40, life: 0.9f, sMin: 0.5f, sMax: 1.0f, peak: 0.9f,
             tint: new Color(0.95f, 0.98f, 1f)));
 
-        // Falling sheet — cubes pouring down the face for volume.
+        // Falling sheet — a dense column of cubes pouring down the face for volume.
         root.AddChild(Emitter("FallSheet", lipCenter.Lerp(baseCenter, 0.5f),
             box: new Vector3(hw, fallHeight * 0.5f, 0.16f),
-            dir: Vector3.Down, spread: 8f, vMin: 3f, vMax: 6f, gravity: -12f, spin: 160f,
-            amount: 55, life: Mathf.Clamp(fallHeight / 6f, 0.7f, 1.5f),
-            sMin: 0.45f, sMax: 1.0f, peak: 0.8f, tint: new Color(0.86f, 0.93f, 1f)));
+            dir: Vector3.Down, spread: 9f, vMin: 3f, vMax: 6f, gravity: -12f, spin: 160f,
+            amount: 85, life: Mathf.Clamp(fallHeight / 6f, 0.7f, 1.5f),
+            sMin: 0.45f, sMax: 1.1f, peak: 0.85f, tint: new Color(0.86f, 0.93f, 1f)));
 
-        // Base splash — a chunky burst where the sheet hits the pool.
+        // Base splash — a big chunky burst kicking up where the sheet hits the pool.
         root.AddChild(Emitter("BaseSplash", baseCenter,
-            box: new Vector3(hw + 0.5f, 0.12f, 0.6f),
-            dir: Vector3.Up, spread: 55f, vMin: 2.4f, vMax: 5.0f, gravity: -8f, spin: 260f,
-            amount: 80, life: 0.9f, sMin: 0.6f, sMax: 1.6f, peak: 0.95f,
+            box: new Vector3(hw + 0.6f, 0.12f, 0.7f),
+            dir: Vector3.Up, spread: 58f, vMin: 2.6f, vMax: 5.4f, gravity: -8f, spin: 260f,
+            amount: 110, life: 0.95f, sMin: 0.6f, sMax: 1.7f, peak: 0.95f,
             tint: new Color(0.97f, 0.99f, 1f)));
 
+        // Foam pool — a wide, dense mat of white cubes churning on the surface around the impact,
+        // the big bright foam patch a voxel waterfall throws where it lands.
+        root.AddChild(Emitter("FoamPool", baseCenter + spillDir * 0.8f,
+            box: new Vector3(hw + 1.0f, 0.12f, 1.6f),
+            dir: Vector3.Up, spread: 80f, vMin: 0.3f, vMax: 1.2f, gravity: -1.5f, spin: 90f,
+            amount: 130, life: 1.5f, sMin: 0.5f, sMax: 1.2f, peak: 0.9f,
+            tint: new Color(0.95f, 0.98f, 1f)));
+
         // Drifting bubbles — translucent cubes carried away across the pool surface by the current.
-        root.AddChild(Emitter("Bubbles", baseCenter + spillDir * 1.1f + Vector3.Down * 0.2f,
-            box: new Vector3(hw + 0.8f, 0.1f, 0.5f),
+        root.AddChild(Emitter("Bubbles", baseCenter + spillDir * 1.6f + Vector3.Down * 0.2f,
+            box: new Vector3(hw + 1.0f, 0.1f, 0.6f),
             dir: spillDir, spread: 34f, vMin: 0.5f, vMax: 1.4f, gravity: 0f, spin: 50f,
-            amount: 64, life: 2.6f, sMin: 0.35f, sMax: 0.7f, peak: 0.5f,
+            amount: 72, life: 2.8f, sMin: 0.35f, sMax: 0.7f, peak: 0.5f,
             tint: new Color(0.88f, 0.95f, 1f)));
         return root;
     }

@@ -11,6 +11,7 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 uniform vec3 shallow_color : source_color = vec3(0.20, 0.52, 0.66);
 uniform vec3 deep_color : source_color = vec3(0.04, 0.20, 0.34);
 uniform vec3 foam_color : source_color = vec3(0.86, 0.93, 1.0);
+uniform vec3 fall_color : source_color = vec3(0.32, 0.66, 0.88); // vibrant cyan body of a waterfall
 uniform float wave_height = 0.07;
 uniform float wave_speed = 1.1;
 uniform float water_alpha : hint_range(0.0, 1.0) = 0.74;
@@ -118,9 +119,9 @@ void fragment() {
     if (top && spd2 > 0.001) {
         vec2 dir = v_flow / spd2;
         float fn = fbm2((v_wpos.xz - dir * (TIME * flow_speed)) * 2.2);
-        float foam = smoothstep(0.62, 0.88, fn) * smoothstep(0.25, 0.8, spd2);
-        foam += smoothstep(0.55, 1.0, spd2) * 0.6;   // bold whitewater band at the brink/lip
-        ALBEDO = mix(ALBEDO, foam_color, clamp(foam, 0.0, 0.85));
+        float foam = smoothstep(0.55, 0.85, fn) * smoothstep(0.2, 0.8, spd2);
+        foam += smoothstep(0.5, 1.0, spd2) * 0.85;   // bold white brink where it pours over
+        ALBEDO = mix(ALBEDO, foam_color, clamp(foam, 0.0, 0.95));
     }
 
     // B2 — waterfall curtain: aperiodic vertical foam streaks. Multiple fbm layers scrolling
@@ -135,17 +136,16 @@ void fragment() {
         float a = fbm2(vec2(ax * 1.2, v_wpos.y * 1.0 + TIME * (fall_speed * 0.7 + lh * 0.5) + lh * 9.0));
         float b = fbm2(vec2(ax * 2.6, v_wpos.y * 1.9 + TIME * fall_speed * 1.2));
         float streaks = a * 0.6 + b * 0.4;
-        // Bold whitewater: foam-dominant, blue only in the troughs — reads as churning falling
-        // water, not translucent glass. Matte (high roughness) so it doesn't mirror the sky.
-        vec3 col = mix(shallow_color, foam_color, smoothstep(0.30, 0.78, streaks));
-        col = mix(col, deep_color, smoothstep(0.35, 0.0, streaks) * 0.35); // depth in the troughs
-        // churning foam at the lip (top of the curtain) where it pours over the brink.
+        // OPAQUE, vibrant cyan→white whitewater (its own colour, not the translucent pond water).
+        // Matte (high roughness) so it doesn't mirror the sky like a pane of glass.
+        vec3 col = mix(fall_color, foam_color, smoothstep(0.22, 0.70, streaks));
+        // churning white foam at the lip (top of the curtain) where it pours over the brink.
         float churn = fbm2(vec2(ax * 2.0, v_wpos.y * 3.0 + TIME * fall_speed * 2.2));
-        if (v_fall < 0.75) col = mix(col, foam_color, smoothstep(0.28, 0.6, churn));
+        if (v_fall < 0.75) col = mix(col, foam_color, smoothstep(0.22, 0.55, churn));
         ALBEDO = col;
-        ROUGHNESS = 0.55;
-        SPECULAR = 0.2;
+        ROUGHNESS = 0.6;
+        SPECULAR = 0.15;
         METALLIC = 0.0;
-        ALPHA = clamp(0.82 + smoothstep(0.5, 0.85, streaks) * 0.18, 0.0, 1.0);
+        ALPHA = 0.97;   // opaque falling water — you should not see through a waterfall
     }
 }
