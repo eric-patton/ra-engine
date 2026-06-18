@@ -55,6 +55,9 @@ public sealed partial class AmbientLifeDirector : Node3D
     private bool _overWater;
     private float _waterSurfaceY;
     private Vector3 _waterPoint;
+    private readonly List<Vector3> _waterCells = new();   // open same-level surface cells = the space fish roam inside
+    private readonly List<Vector4> _scanCells = new();    // scratch: (centreXYZ, liquid-cell-y) from the dense scan
+    private int _waterMiss;                                // sticky: only drop fish after a few consecutive empty ticks
 
     public override void _Ready()
     {
@@ -231,30 +234,44 @@ public sealed partial class AmbientLifeDirector : Node3D
                     }
         }
 
-        // Open water surface nearby? Topmost liquid cell whose cover above is open (air or a non-solid
-        // decoration like reeds), near the player. Testing !IsSolid (not == air) so a decorated pond
-        // surface still counts.
-        _overWater = false;
+        // Open water nearby. Collect every open liquid-surface cell in a dense radius (cover above is air
+        // or a non-solid decoration — testing !IsSolid, not == air, so a decorated pond still counts), then
+        // pick the body nearest the player AT ROUGHLY THEIR LEVEL — so a tall waterfall's high surface can't
+        // win over the pond at their feet — and keep that body's same-level cells as the space the fish roam
+        // inside. Sticky across a few empty ticks so fish don't blink as the player walks the shoreline.
         if (WorldOk)
         {
-            float best = float.NegativeInfinity;
-            for (int dx = -8; dx <= 8; dx += 4)
-                for (int dz = -8; dz <= 8; dz += 4)
+            _scanCells.Clear();
+            const int r = 8;
+            float bestScore = float.PositiveInfinity;
+            int bestY = 0; Vector3 bestPoint = default;
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
                 {
                     int x = px + dx, z = pz + dz;
-                    for (int y = py + 4; y >= py - 6; y--)
-                        if (World.GetBlock(x, y, z).IsLiquid)
+                    for (int y = py + 5; y >= py - 7; y--)
+                    {
+                        if (!World.GetBlock(x, y, z).IsLiquid) continue;
+                        var above = new Vector3I(x, y + 1, z);
+                        if (!World.IsSolid(above) && !World.GetBlock(above).IsLiquid)
                         {
-                            var above = new Vector3I(x, y + 1, z);
-                            if (!World.IsSolid(above) && !World.GetBlock(above).IsLiquid && y > best)
-                            {
-                                best = y;
-                                _waterPoint = new Vector3(x + 0.5f, y + 1f, z + 0.5f);
-                            }
-                            break; // topmost liquid in this column found; deeper cells aren't the surface
+                            _scanCells.Add(new Vector4(x + 0.5f, y + 1f, z + 0.5f, y));
+                            float score = Mathf.Abs(dx) + Mathf.Abs(dz) + 2.5f * Mathf.Abs(y - py);
+                            if (score < bestScore) { bestScore = score; bestY = y; bestPoint = new Vector3(x + 0.5f, y + 1f, z + 0.5f); }
                         }
+                        break; // topmost liquid in this column; deeper cells aren't the surface
+                    }
                 }
-            if (!float.IsNegativeInfinity(best)) { _overWater = true; _waterSurfaceY = best + 1f; }
+            if (_scanCells.Count > 0)
+            {
+                _waterPoint = bestPoint;
+                _waterSurfaceY = bestY + 1f;
+                _waterCells.Clear();
+                foreach (var c in _scanCells)
+                    if (Mathf.Abs(c.W - bestY) <= 1f) _waterCells.Add(new Vector3(c.X, c.Y, c.Z));
+                _overWater = true; _waterMiss = 0;
+            }
+            else if (++_waterMiss >= 3) { _overWater = false; _waterCells.Clear(); }
         }
 
         // --- populations (recomputed here, on the throttle, NOT every frame) ---
@@ -264,10 +281,10 @@ public sealed partial class AmbientLifeDirector : Node3D
         float ds = _densityScale;
         int birdsWant = Mathf.RoundToInt(4.5f * day * dry * ds);   // scales to 0 at night
         int fliesWant = meadow ? Mathf.RoundToInt(6f * day * dry * ds) : 0;
-        int fishWant  = _overWater ? Mathf.RoundToInt(5f * ds) : 0;
+        int fishWant  = _overWater ? Mathf.RoundToInt(3f * ds) : 0;
         Resize(_birds, Mathf.Min(birdsWant, 8), SpawnBird);
         Resize(_butterflies, Mathf.Min(fliesWant, 8), SpawnButterfly);
-        Resize(_fish, Mathf.Min(fishWant, 6), SpawnFish);
+        Resize(_fish, Mathf.Min(fishWant, 5), SpawnFish);
     }
 
     // =====================================================================================
@@ -282,8 +299,8 @@ public sealed partial class AmbientLifeDirector : Node3D
         // birds/doves: a crossing/climbing segment + bob
         public Vector3 From, To;
         public float T, Speed, BobAmp, BobFreq;
-        // butterflies/fish: a roaming offset around the player / water point
-        public Vector3 Offset;
+        // butterflies: a fixed world anchor to roam around; fish: current pos + target water cell
+        public Vector3 Home, Pos, Target;
         public float Wander;
         // fish jump state
         public float JumpTimer; public bool Jumping; public float JumpT; public bool SplashedUp, SplashedDown;
@@ -408,17 +425,27 @@ public sealed partial class AmbientLifeDirector : Node3D
     {
         var tint = ButterflyWings[Mathf.Min((int)(GD.Randf() * ButterflyWings.Length), ButterflyWings.Length - 1)];
         var f = MakeFlyer(0.42f, AmbientTex.Butterfly(), tint, 2, 9f, upright: true);
-        float ang = GD.Randf() * Mathf.Tau, rad = 2f + GD.Randf() * 7f;
-        f.Offset = new Vector3(Mathf.Cos(ang) * rad, 0.8f + GD.Randf() * 1.8f, Mathf.Sin(ang) * rad);
         f.Wander = 1.2f + GD.Randf() * 1.3f;
         f.Seed = GD.Randf();
+        HomeButterfly(f, Player.GlobalPosition);
         return f;
+    }
+
+    // A butterfly roams around a FIXED world anchor (so it reads as part of the world, not glued to the
+    // camera); only when the player drifts well clear of it does it re-anchor near the player again, so the
+    // meadow ahead keeps its flutter without any single butterfly ever tracking the view.
+    private static void HomeButterfly(Flyer f, Vector3 pp)
+    {
+        float ang = GD.Randf() * Mathf.Tau, rad = 3f + GD.Randf() * 7f;
+        f.Home = pp + new Vector3(Mathf.Cos(ang) * rad, 0.8f + GD.Randf() * 1.6f, Mathf.Sin(ang) * rad);
     }
 
     private void UpdateButterfly(Flyer f, Vector3 pp, float t)
     {
+        Vector3 d = f.Home - pp; d.Y = 0f;
+        if (d.LengthSquared() > 18f * 18f) HomeButterfly(f, pp);
         float w = t * 0.8f + f.Seed * 12f;
-        Vector3 p = pp + f.Offset + new Vector3(
+        Vector3 p = f.Home + new Vector3(
             Mathf.Sin(w * 1.3f) * f.Wander,
             Mathf.Sin(w * 2.3f) * 0.4f,
             Mathf.Cos(w) * f.Wander);
@@ -427,44 +454,70 @@ public sealed partial class AmbientLifeDirector : Node3D
     }
 
     // ---- fish (D9) ----
+    private static readonly Color[] FishColors =
+    {
+        new(0.85f, 0.90f, 0.98f), new(1f, 0.60f, 0.26f), new(0.95f, 0.82f, 0.42f), new(0.70f, 0.80f, 0.92f),
+    };
+
     private Flyer SpawnFish()
     {
-        var f = MakeFlyer(0.5f, AmbientTex.Fish(), new Color(0.78f, 0.86f, 0.95f), 2, 3.5f, upright: true);
-        float ang = GD.Randf() * Mathf.Tau, rad = GD.Randf() * 3f;
-        f.Offset = new Vector3(Mathf.Cos(ang) * rad, 0f, Mathf.Sin(ang) * rad);
-        f.Wander = 0.6f + GD.Randf() * 0.8f;
+        var tint = FishColors[Mathf.Min((int)(GD.Randf() * FishColors.Length), FishColors.Length - 1)];
+        var f = MakeFlyer(0.62f, AmbientTex.Fish(), tint, 2, 3.5f, upright: true);
+        ((QuadMesh)f.Node.Mesh).Size = new Vector2(0.62f, 0.30f);  // fish are wider than tall (16×8 frames)
+        f.Wander = 0.5f + GD.Randf() * 0.5f;                        // bob amplitude only — the roam is cell-to-cell now
         f.JumpTimer = 3f + GD.Randf() * 6f;
         f.Seed = GD.Randf();
+        f.Pos = _waterCells.Count > 0 ? _waterCells[(int)(GD.Randf() * _waterCells.Count) % _waterCells.Count] : _waterPoint;
+        f.Target = NextFishTarget(f.Pos);
         return f;
+    }
+
+    // The fish only ever heads for a real open-water cell, so it stays contained to the pond — it can't
+    // climb a waterfall or beach itself. Prefer a cell a little away so it actually travels.
+    private Vector3 NextFishTarget(Vector3 from)
+    {
+        if (_waterCells.Count == 0) return _waterPoint;
+        for (int tries = 0; tries < 4; tries++)
+        {
+            var c = _waterCells[(int)(GD.Randf() * _waterCells.Count) % _waterCells.Count];
+            if ((c - from).LengthSquared() > 1f) return c;
+        }
+        return _waterCells[(int)(GD.Randf() * _waterCells.Count) % _waterCells.Count];
     }
 
     private void UpdateFish(Flyer f, float t, float dt)
     {
         if (!_overWater) { f.Node.Visible = false; return; }
         f.Node.Visible = true;
-        float w = t * 1.1f + f.Seed * 9f;
-        Vector3 home = _waterPoint + f.Offset;
-        float x = home.X + Mathf.Sin(w) * f.Wander;
-        float z = home.Z + Mathf.Cos(w * 0.8f) * f.Wander;
         float baseY = _waterSurfaceY - 0.6f;        // cruise clearly under the surface
 
         if (f.Jumping)
         {
             f.JumpT += dt * 1.4f;
             float arc = Mathf.Sin(f.JumpT * Mathf.Pi) * 0.7f;       // peaks ~0.7 m above the surface
-            f.Node.GlobalPosition = new Vector3(x, _waterSurfaceY - 0.1f + arc, z);
-            // Fire the splashes off the JUMP PROGRESS, not the float y-crossing, so a frame hitch
-            // (e.g. the windowed test's timer stalls) can't swallow either splash. Ripple on the surface.
-            if (!f.SplashedUp && f.JumpT >= 0.05f) { Splash(new Vector3(x, _waterSurfaceY, z)); f.SplashedUp = true; }
-            if (!f.SplashedDown && f.JumpT >= 0.95f) { Splash(new Vector3(x, _waterSurfaceY, z)); f.SplashedDown = true; }
+            f.Node.GlobalPosition = new Vector3(f.Pos.X, _waterSurfaceY - 0.1f + arc, f.Pos.Z);
+            // Splashes fire off the JUMP PROGRESS, not a float y-crossing, so a frame hitch can't swallow
+            // one — and they land at f.Pos, which is a water cell, so the ripple is always on the pond.
+            if (!f.SplashedUp && f.JumpT >= 0.05f) { Splash(new Vector3(f.Pos.X, _waterSurfaceY, f.Pos.Z)); f.SplashedUp = true; }
+            if (!f.SplashedDown && f.JumpT >= 0.95f) { Splash(new Vector3(f.Pos.X, _waterSurfaceY, f.Pos.Z)); f.SplashedDown = true; }
             if (f.JumpT >= 1f) { f.Jumping = false; f.JumpTimer = 4f + GD.Randf() * 6f; }
+            Flap(f, t, 2);
+            return;
         }
-        else
-        {
-            f.Node.GlobalPosition = new Vector3(x, baseY, z);
-            f.JumpTimer -= dt;
-            if (f.JumpTimer <= 0f) { f.Jumping = true; f.JumpT = 0f; f.SplashedUp = f.SplashedDown = false; }
-        }
+
+        // Swim toward the current target cell; pick another on arrival. Both endpoints are water cells, so
+        // the straight run between them stays over the pond.
+        Vector3 step = new(f.Target.X - f.Pos.X, 0f, f.Target.Z - f.Pos.Z);
+        float dist = step.Length();
+        float move = (0.7f + f.Wander) * dt;
+        if (dist <= move || dist < 0.05f) { f.Pos = new Vector3(f.Target.X, f.Pos.Y, f.Target.Z); f.Target = NextFishTarget(f.Pos); }
+        else f.Pos += step / dist * move;
+
+        float bob = Mathf.Sin(t * 1.6f + f.Seed * 9f) * 0.12f;
+        f.Node.GlobalPosition = new Vector3(f.Pos.X, baseY + bob, f.Pos.Z);
+
+        f.JumpTimer -= dt;
+        if (f.JumpTimer <= 0f) { f.Jumping = true; f.JumpT = 0f; f.SplashedUp = f.SplashedDown = false; }
         Flap(f, t, 2);
     }
 
@@ -604,22 +657,30 @@ internal static class AmbientTex
         }
     });
 
-    // Two fish frames (tail swung left / right), white, tinted at runtime. 24×12 = 2×(12×12).
-    public static Texture2D Fish() => _fish ??= Bake(24, 12, img =>
+    // Two fish frames (tail swung down / up), side-on with a fanned tail and a dark eye, baked mostly
+    // white (tinted at runtime) with a faintly darker dorsal so it reads as a fish, not a blob.
+    // 32×8 = 2×(16×8) — wider than tall, like a real fish.
+    public static Texture2D Fish() => _fish ??= Bake(32, 8, img =>
     {
+        var eye = new Color(0.12f, 0.12f, 0.16f, 1f);
         for (int frame = 0; frame < 2; frame++)
         {
-            int ox = frame * 12;
-            float tail = frame == 0 ? -1.5f : 1.5f;
-            for (int y = 0; y < 12; y++)
-                for (int x = 0; x < 12; x++)
+            int ox = frame * 16;
+            float tail = frame == 0 ? 1.6f : -1.6f;                          // tail tip swings up/down
+            for (int y = 0; y < 8; y++)
+                for (int x = 0; x < 16; x++)
                 {
-                    float u = (x - 6.5f) / 4.5f, v = (y - 5.5f) / 2.6f;
-                    bool body = u * u + v * v <= 1f;                       // body toward the front
-                    float ty = 5.5f + tail * (x / 11f);
-                    bool fin = x <= 3 && Mathf.Abs(y - ty) <= (3.5f - x * 0.6f); // tail fan at the back
-                    if (body || fin) img.SetPixel(ox + x, y, Colors.White);
+                    float u = (x - 9.5f) / 5.5f, v = (y - 3.5f) / 2.6f;
+                    bool body = u * u + v * v <= 1f;                          // teardrop body, head at right
+                    float ty = 3.5f + tail * (4 - x) / 4f;                    // tail centre-line, swung
+                    bool fin = x <= 4 && Mathf.Abs(y - ty) <= 0.8f + (4 - x) * 0.7f; // fan widening toward the rear
+                    if (body || fin)
+                    {
+                        float top = y <= 2 ? 0.78f : 1f;                      // faint darker dorsal
+                        img.SetPixel(ox + x, y, new Color(top, top, top, 1f));
+                    }
                 }
+            img.SetPixel(ox + 12, 2, eye);                                   // eye near the head
         }
     });
 }

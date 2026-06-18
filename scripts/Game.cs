@@ -1768,12 +1768,14 @@ public partial class Game : Node3D
     {
         var session = new GameSession { Name = "Session" };
         AddChild(session);
-        session.Setup(new Vector3(12, 2, 33), creative: false, captureMouse: false);
+        // Stand just south of the pond (x5-8,z32-35) facing the default −Z so the water is dead ahead and
+        // within the fish water-scan, pitched down to look into it — so the shot actually frames the fish.
+        session.Setup(new Vector3(6, 3, 40), creative: false, captureMouse: false);
         Core.WorldGen.FxShowcase(session.World);
         session.World.MarkAllDirty();
         session.World.RebuildAllNow();
         session.Ambient.SetDensityScale(1.6f);      // lush, so the test clearly exercises every effect
-        session.Player.Head.Rotation = new Vector3(-0.05f, 0, 0);
+        session.Player.Head.Rotation = new Vector3(-0.32f, 0, 0);
 
         session.Env.SetFixedTime(Core.EnvironmentController.Noon);
         await ToSignal(GetTree().CreateTimer(3.0), SceneTreeTimer.SignalName.Timeout); // let life populate
